@@ -7022,3 +7022,250 @@ renderFCPreview = function(g){
 
 console.log('JIC IELTS — flowchart resize, arrow delete, bold loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Matching Information — paragraph letters
+//  dropdown with configurable count
+// ═══════════════════════════════════════════════
+
+// Override onQGTy to show paragraph count for minfo
+var _prevOnQGTy3 = onQGTy;
+onQGTy = function(){
+  _prevOnQGTy3();
+  var t = document.getElementById('qg-ty'); if(!t) return;
+  var v = t.value;
+  // Show paragraph count field for minfo
+  var miEl = document.getElementById('qg-minfo-para');
+  if(miEl) miEl.style.display = v==='minfo'?'block':'none';
+  // For minfo, hide the regular match options (those are for named options)
+  var moEl = document.getElementById('qg-mopts');
+  if(moEl && v==='minfo') moEl.style.display = 'none';
+};
+
+// Override openQG to inject minfo paragraph count field
+var _prevOpenQG3 = openQG;
+openQG = function(mod, sp){
+  _prevOpenQG3(mod, sp);
+  setTimeout(function(){
+    // Find the match options div and inject minfo field before it
+    var moEl = document.getElementById('qg-mopts');
+    if(!moEl || document.getElementById('qg-minfo-para')) return;
+    var miDiv = document.createElement('div');
+    miDiv.id = 'qg-minfo-para';
+    miDiv.style.display = 'none';
+    miDiv.innerHTML =
+      '<div style="background:var(--bll);border-radius:var(--r);padding:12px;margin-bottom:14px">' +
+      '<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#0C447C">Matching Information settings</div>' +
+      '<div class="fg">' +
+      '<div class="fr" style="margin:0"><label class="fl">Number of paragraphs in passage</label>' +
+      '<input class="inp" type="number" id="minfo-para-count" value="7" min="1" max="15" oninput="updateMinfoHint()"></div>' +
+      '<div class="fr" style="margin:0"><label class="fl">Paragraph labels start from</label>' +
+      '<select class="inp" id="minfo-para-start">' +
+      '<option value="A">A (A, B, C...)</option>' +
+      '<option value="1">1 (1, 2, 3...)</option>' +
+      '</select></div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
+      '<input type="checkbox" id="minfo-repeat" checked>' +
+      '<label for="minfo-repeat" style="font-size:13px;cursor:pointer">Students may use any letter more than once</label>' +
+      '</div>' +
+      '<div id="minfo-hint" style="font-size:12px;color:var(--mu);margin-top:8px;font-style:italic"></div>' +
+      '</div>';
+    moEl.parentNode.insertBefore(miDiv, moEl);
+    // Check if minfo is already selected
+    var t = document.getElementById('qg-ty');
+    if(t && t.value==='minfo'){
+      miDiv.style.display = 'block';
+      if(moEl) moEl.style.display = 'none';
+    }
+    updateMinfoHint();
+  }, 120);
+};
+
+function updateMinfoHint(){
+  var countEl = document.getElementById('minfo-para-count');
+  var startEl = document.getElementById('minfo-para-start');
+  var hintEl = document.getElementById('minfo-hint');
+  if(!countEl || !startEl || !hintEl) return;
+  var count = parseInt(countEl.value) || 7;
+  var start = startEl.value;
+  var labels = getParaLabels(count, start);
+  hintEl.innerHTML = 'Dropdown will show: <strong>' + labels.join(', ') + '</strong>';
+}
+
+function getParaLabels(count, start){
+  var labels = [];
+  if(start === '1'){
+    for(var i=1; i<=count; i++) labels.push(String(i));
+  } else {
+    for(var i=0; i<count; i++) labels.push(String.fromCharCode(65+i));
+  }
+  return labels;
+}
+
+// Override saveQG to save minfo settings
+var _prevSaveQG5 = saveQG;
+saveQG = function(){
+  var ty = document.getElementById('qg-ty').value;
+  if(ty !== 'minfo'){
+    _prevSaveQG5();
+    return;
+  }
+  var fr = parseInt(document.getElementById('qg-fr').value)||1;
+  var to = parseInt(document.getElementById('qg-to').value)||fr;
+  var ins = document.getElementById('qg-in').value.trim();
+  var wl = document.getElementById('qg-wl').value;
+  var countEl = document.getElementById('minfo-para-count');
+  var startEl = document.getElementById('minfo-para-start');
+  var repeatEl = document.getElementById('minfo-repeat');
+  var count = countEl ? parseInt(countEl.value)||7 : 7;
+  var start = startEl ? startEl.value : 'A';
+  var repeat = repeatEl ? repeatEl.checked : true;
+  var labels = getParaLabels(count, start);
+  // Auto-generate instruction if empty
+  if(!ins){
+    ins = 'Reading Passage has ' + count + ' paragraphs, **' +
+      labels[0] + '–' + labels[labels.length-1] + '**. ' +
+      'Which paragraph contains the following information?' +
+      (repeat ? '\n**NB** You may use any letter more than once.' : '');
+  }
+  var g = {
+    type:'minfo', fromQ:fr, toQ:to,
+    instruction:ins, wordLimit:wl,
+    questions:[], wordBox:[], headingsList:[],
+    matchOptions:[], tableData:null, image:null,
+    summaryText:null, summaryAnswers:[],
+    minfoParaCount:count,
+    minfoParaStart:start,
+    minfoParaLabels:labels,
+    minfoRepeat:repeat
+  };
+  var tc = getTC();
+  if(qgCtx.mod==='listening') tc.listening.sections[qgCtx.sp].groups.push(g);
+  else tc.reading.passages[qgCtx.sp].groups.push(g);
+  closeM('qg');
+  showToast('Matching Information group added!');
+  renderMod(curTOwner==='admin'?'a':'t', qgCtx.mod);
+};
+
+// Override openQ to handle minfo properly
+var _prevOpenQ2 = openQ;
+openQ = function(mod, sp, gi){
+  qCtx = {mod:mod, sp:sp, gi:gi};
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  if(g.type !== 'minfo'){
+    _prevOpenQ2(mod, sp, gi);
+    return;
+  }
+  var qn = g.fromQ + g.questions.length;
+  var labels = g.minfoParaLabels || getParaLabels(g.minfoParaCount||7, g.minfoParaStart||'A');
+  document.getElementById('q-title').textContent = 'Add Q'+qn+' — Matching Information';
+  var h = '<input type="hidden" id="qn" value="'+qn+'">';
+  h += '<div class="fr"><label class="fl">Statement (what information to find)</label>'+
+    '<textarea class="inp" id="qt" rows="3" placeholder="e.g. a reference to the negative effects of a new technology"></textarea></div>';
+  h += '<div class="fr"><label class="fl">Correct paragraph</label>'+
+    '<select class="inp" id="qa">'+
+    labels.map(function(l){ return '<option value="'+l+'">'+l+'</option>'; }).join('')+
+    '</select></div>';
+  if(g.minfoRepeat){
+    h += '<div style="font-size:12px;color:var(--mu);margin-top:-8px;margin-bottom:12px">'+
+      'Students may use any letter more than once.</div>';
+  }
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = saveQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Save question';
+  openM('q');
+};
+
+// Override buildPrevQBlock for minfo
+var _prevBuildPrevQBlock3 = buildPrevQBlock;
+buildPrevQBlock = function(g, getQNum){
+  if(g.type !== 'minfo') return _prevBuildPrevQBlock3(g, getQNum);
+  var labels = g.minfoParaLabels || getParaLabels(g.minfoParaCount||7, g.minfoParaStart||'A');
+  var tl = 'Matching Information';
+  var h = '<div class="prev-qblock"><div class="prev-qtl">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>';
+  if(g.instruction) h += '<div class="prev-inst">'+renderBold(g.instruction)+'</div>';
+  // Show paragraph reference
+  h += '<div class="prev-wb"><div class="prev-wb-title">Paragraphs in passage</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:6px">'+
+    labels.map(function(l){
+      return '<span style="width:30px;height:30px;border-radius:50%;background:var(--bll);color:var(--bl);'+
+        'display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">'+l+'</span>';
+    }).join('')+
+    '</div>'+
+    (g.minfoRepeat?'<div style="font-size:12px;color:var(--mu);margin-top:6px"><strong>NB</strong> You may use any letter more than once.</div>':'')+
+    '</div>';
+  // Questions
+  var qs = g.questions.length ? g.questions : mkDummyQs(g.fromQ, g.toQ, g.type);
+  qs.forEach(function(q){
+    var n = q.num || getQNum();
+    h += '<div style="margin-bottom:14px">'+
+      '<div class="prev-qn">Question '+n+'</div>'+
+      '<div class="prev-stem">'+renderBold(q.text||'Question '+n)+'</div>'+
+      '<select class="prev-inp" onchange="prevAnswers['+n+']=this.value">'+
+      '<option value="">Select paragraph...</option>'+
+      labels.map(function(l){ return '<option value="'+l+'">Paragraph '+l+'</option>'; }).join('')+
+      '</select></div>';
+  });
+  h += '</div>';
+  return h;
+};
+
+// Also fix openEditQG for minfo
+var _prevOpenEditQG2 = openEditQG;
+openEditQG = function(mod, sp, gi){
+  _prevOpenEditQG2(mod, sp, gi);
+  setTimeout(function(){
+    var tc = getTC();
+    var g = mod==='listening' ?
+      tc.listening.sections[sp].groups[gi] :
+      tc.reading.passages[sp].groups[gi];
+    if(g.type !== 'minfo') return;
+    // Inject minfo settings into edit modal
+    var eqgIn = document.getElementById('eqg-in');
+    if(!eqgIn || document.getElementById('eqg-minfo')) return;
+    var miDiv = document.createElement('div');
+    miDiv.id = 'eqg-minfo';
+    miDiv.style.cssText = 'background:var(--bll);border-radius:var(--r);padding:12px;margin-bottom:14px';
+    miDiv.innerHTML =
+      '<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#0C447C">Matching Information settings</div>'+
+      '<div class="fg">'+
+      '<div class="fr" style="margin:0"><label class="fl">Number of paragraphs</label>'+
+      '<input class="inp" type="number" id="eminfo-count" value="'+(g.minfoParaCount||7)+'" min="1" max="15"></div>'+
+      '<div class="fr" style="margin:0"><label class="fl">Labels start from</label>'+
+      '<select class="inp" id="eminfo-start">'+
+      '<option value="A"'+(g.minfoParaStart==='A'?' selected':'')+'>A (A, B, C...)</option>'+
+      '<option value="1"'+(g.minfoParaStart==='1'?' selected':'')+'>1 (1, 2, 3...)</option>'+
+      '</select></div>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'+
+      '<input type="checkbox" id="eminfo-repeat"'+(g.minfoRepeat?' checked':'')+'>'+
+      '<label for="eminfo-repeat" style="font-size:13px;cursor:pointer">May use any letter more than once</label>'+
+      '</div>';
+    eqgIn.parentNode.insertBefore(miDiv, eqgIn);
+    // Update updateQG to save minfo settings
+    var origUpdateQG = updateQG;
+    updateQG = function(){
+      var tc2 = getTC();
+      var g2 = editQGCtx.mod==='listening' ?
+        tc2.listening.sections[editQGCtx.sp].groups[editQGCtx.gi] :
+        tc2.reading.passages[editQGCtx.sp].groups[editQGCtx.gi];
+      if(g2.type === 'minfo'){
+        var ec = document.getElementById('eminfo-count');
+        var es = document.getElementById('eminfo-start');
+        var er = document.getElementById('eminfo-repeat');
+        if(ec) g2.minfoParaCount = parseInt(ec.value)||7;
+        if(es) g2.minfoParaStart = es.value;
+        if(er) g2.minfoRepeat = er.checked;
+        g2.minfoParaLabels = getParaLabels(g2.minfoParaCount, g2.minfoParaStart);
+      }
+      origUpdateQG();
+    };
+  }, 200);
+};
+
+console.log('JIC IELTS — Matching Information paragraph dropdown loaded ✓');
+</script>
