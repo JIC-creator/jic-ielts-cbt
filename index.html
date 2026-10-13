@@ -5541,3 +5541,602 @@ enterClassroom=function(testId,testData,testContent,userRole){
 
 console.log('JIC IELTS — classroom subjects + independent scroll loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  NEW FEATURES:
+//  1. Flow-chart builder with drag, arrows, blanks
+//  2. Image lightbox/enlarge on click
+//  3. Form+Note under Table type
+//  4. Resizable split screen in classroom
+// ═══════════════════════════════════════════════
+
+// ── CSS ──
+var newFeatureCSS = document.createElement('style');
+newFeatureCSS.textContent = `
+/* ── LIGHTBOX ── */
+.lightbox-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.85);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox-overlay.open { display: flex; }
+.lightbox-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: var(--r);
+  box-shadow: 0 8px 40px rgba(0,0,0,.6);
+  object-fit: contain;
+}
+.lightbox-close {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  color: #fff;
+  font-size: 28px;
+  cursor: pointer;
+  background: rgba(0,0,0,.5);
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+/* Make preview images clickable */
+.prev-img-wrap { position: relative; display: inline-block; cursor: zoom-in; }
+.prev-img-wrap::after {
+  content: '🔍';
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0,0,0,.5);
+  color: #fff;
+  border-radius: var(--r);
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+/* ── FLOWCHART BUILDER ── */
+.fc-canvas-wrap {
+  position: relative;
+  background: #f8f8f6;
+  border: 1px solid var(--bm);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.fc-canvas {
+  position: relative;
+  width: 100%;
+  min-height: 400px;
+  cursor: default;
+}
+.fc-node {
+  position: absolute;
+  min-width: 120px;
+  min-height: 50px;
+  background: #fff;
+  border: 2px solid var(--bl);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  cursor: move;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.1);
+  z-index: 2;
+}
+.fc-node.selected { border-color: var(--am); box-shadow: 0 0 0 3px rgba(133,79,11,.2); }
+.fc-node.blank-node { border-color: var(--gr); background: var(--grl); }
+.fc-node-text { font-size: 12px; line-height: 1.4; min-width: 80px; outline: none; background: transparent; border: none; width: 100%; resize: none; font-family: inherit; }
+.fc-node-qnum { font-size: 10px; font-weight: 700; color: var(--bl); margin-bottom: 3px; }
+.fc-node-ans { font-size: 10px; color: var(--gr); margin-top: 3px; border-top: 1px dashed var(--gr); padding-top: 3px; }
+.fc-node-controls {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  display: none;
+  gap: 3px;
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--r);
+  padding: 2px 4px;
+}
+.fc-node:hover .fc-node-controls,
+.fc-node.selected .fc-node-controls { display: flex; }
+.fc-node-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--mu);
+}
+.fc-node-btn:hover { background: var(--bg); }
+.fc-connect-port {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bl);
+  position: absolute;
+  cursor: crosshair;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.fc-node:hover .fc-connect-port { opacity: 1; }
+.fc-port-r { right: -5px; top: 50%; transform: translateY(-50%); }
+.fc-port-l { left: -5px; top: 50%; transform: translateY(-50%); }
+.fc-port-t { top: -5px; left: 50%; transform: translateX(-50%); }
+.fc-port-b { bottom: -5px; left: 50%; transform: translateX(-50%); }
+.fc-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--b);
+  flex-wrap: wrap;
+}
+
+/* ── RESIZABLE SPLIT ── */
+.cm-divider {
+  width: 6px;
+  background: rgba(255,255,255,.08);
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  transition: background .15s;
+  z-index: 5;
+}
+.cm-divider:hover, .cm-divider.dragging {
+  background: #7EB8F7;
+}
+.cm-divider::after {
+  content: '⋮';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  color: rgba(255,255,255,.4);
+  font-size: 16px;
+  pointer-events: none;
+}
+
+/* ── TABLE SUB-TYPE ── */
+.tbl-subtype {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tbl-subtype-btn {
+  flex: 1;
+  padding: 10px;
+  border: 2px solid var(--b);
+  border-radius: var(--r);
+  background: var(--s);
+  cursor: pointer;
+  text-align: center;
+  font-size: 13px;
+  font-family: inherit;
+  transition: all .15s;
+  color: var(--mu);
+}
+.tbl-subtype-btn:hover { border-color: var(--bl); color: var(--bl); }
+.tbl-subtype-btn.active { border-color: var(--bl); background: var(--bll); color: var(--bl); font-weight: 600; }
+.tbl-subtype-btn .tsi { font-size: 20px; display: block; margin-bottom: 4px; }
+`;
+document.head.appendChild(newFeatureCSS);
+
+// ── LIGHTBOX ──
+var lbEl = document.createElement('div');
+lbEl.className = 'lightbox-overlay';
+lbEl.innerHTML = '<button class="lightbox-close" onclick="closeLB()">✕</button><img id="lb-img" src="" alt="">';
+lbEl.onclick = function(e){ if(e.target===lbEl) closeLB(); };
+document.body.appendChild(lbEl);
+
+function openLB(src){ document.getElementById('lb-img').src=src; lbEl.classList.add('open'); }
+function closeLB(){ lbEl.classList.remove('open'); document.getElementById('lb-img').src=''; }
+
+// Make all preview images clickable for lightbox
+document.addEventListener('click', function(e){
+  if(e.target.tagName==='IMG' && e.target.closest('.prev-qblock,.prev-full,.cm-questions,.cm-reading-qs')){
+    openLB(e.target.src);
+  }
+});
+// Escape key closes lightbox
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeLB(); });
+
+// ── FEATURE 3: Form + Note under Table ──
+// When table type is selected in openQG, show sub-type selector
+var _prevOnQGTy2 = onQGTy;
+onQGTy = function(){
+  _prevOnQGTy2();
+  var t=document.getElementById('qg-ty'); if(!t) return;
+  var v=t.value;
+  var isTbl=v==='table'||v==='form'||v==='flowchart';
+  // Show sub-type selector for table
+  var stEl=document.getElementById('qg-tbl-subtype');
+  if(stEl) stEl.style.display=isTbl?'block':'none';
+  // Hide flowchart builder unless flowchart selected
+  var fcEl=document.getElementById('qg-flowchart');
+  if(fcEl) fcEl.style.display=v==='flowchart'?'block':'none';
+};
+
+// Override openQG to inject sub-type + flowchart builder
+var _prevOpenQG2 = openQG;
+openQG = function(mod, sp){
+  _prevOpenQG2(mod, sp);
+  setTimeout(function(){
+    var tblDiv=document.getElementById('qg-tbl');
+    if(!tblDiv) return;
+    // Add sub-type selector before table builder
+    var subDiv=document.createElement('div');
+    subDiv.id='qg-tbl-subtype';
+    subDiv.style.display='none';
+    subDiv.innerHTML=
+      '<label class="fl">Completion type</label>'+
+      '<div class="tbl-subtype">'+
+      '<button class="tbl-subtype-btn active" id="st-table" onclick="selTblSubtype(\'table\',this)"><span class="tsi">📊</span>Table</button>'+
+      '<button class="tbl-subtype-btn" id="st-form" onclick="selTblSubtype(\'form\',this)"><span class="tsi">📋</span>Form</button>'+
+      '<button class="tbl-subtype-btn" id="st-note" onclick="selTblSubtype(\'note\',this)"><span class="tsi">📝</span>Notes</button>'+
+      '</div>';
+    tblDiv.parentNode.insertBefore(subDiv,tblDiv);
+    // Add flowchart builder div
+    var fcDiv=document.createElement('div');
+    fcDiv.id='qg-flowchart';
+    fcDiv.style.display='none';
+    fcDiv.innerHTML=buildFCEditor();
+    tblDiv.parentNode.insertBefore(fcDiv,tblDiv.nextSibling);
+    // Re-run type check
+    var t=document.getElementById('qg-ty');
+    if(t) onQGTy();
+  },100);
+};
+
+var currentTblSubtype='table';
+function selTblSubtype(type, el){
+  currentTblSubtype=type;
+  document.querySelectorAll('.tbl-subtype-btn').forEach(function(b){ b.classList.remove('active'); });
+  el.classList.add('active');
+}
+
+// ── FEATURE 1: FLOWCHART BUILDER ──
+var fcNodes=[], fcArrows=[], fcNodeId=0, fcArrowId=0;
+var fcDragging=null, fcDragOffX=0, fcDragOffY=0;
+var fcConnecting=null; // node being connected from
+var fcSelected=null;
+
+function buildFCEditor(){
+  return '<div class="fc-toolbar">'+
+    '<button class="btn btn-sm btn-p" onclick="fcAddNode()">+ Add box</button>'+
+    '<button class="btn btn-sm" onclick="fcAddNode(true)">+ Add blank box</button>'+
+    '<button class="btn btn-sm" style="color:var(--rd);border-color:#F7C1C1" onclick="fcDeleteSelected()">🗑 Delete selected</button>'+
+    '<div style="font-size:11px;color:var(--mu);display:flex;align-items:center;margin-left:auto">'+
+    '💡 Drag boxes to position. Hover a box and drag from the blue dots to draw arrows.</div>'+
+    '</div>'+
+    '<div class="fc-canvas-wrap"><svg id="fc-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1"><defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs></svg>'+
+    '<div class="fc-canvas" id="fc-canvas" onclick="fcCanvasClick(event)" onmousemove="fcMouseMove(event)" onmouseup="fcMouseUp(event)"></div></div>'+
+    '<div id="fc-ans-section" style="margin-top:10px"></div>';
+}
+
+function fcAddNode(isBlank){
+  var id='fcn-'+( ++fcNodeId);
+  var node={
+    id:id, text:'', isBlank:!!isBlank,
+    qNum:null, answer:'',
+    x:60+Math.random()*300, y:60+Math.random()*200,
+    w:140, h:60
+  };
+  fcNodes.push(node);
+  renderFC();
+}
+
+function renderFC(){
+  var canvas=document.getElementById('fc-canvas');
+  var svg=document.getElementById('fc-svg');
+  if(!canvas||!svg) return;
+  canvas.innerHTML='';
+  // Render nodes
+  fcNodes.forEach(function(n){
+    var el=document.createElement('div');
+    el.className='fc-node'+(n.isBlank?' blank-node':'')+(fcSelected===n.id?' selected':'');
+    el.id=n.id;
+    el.style.cssText='left:'+n.x+'px;top:'+n.y+'px;width:'+n.w+'px;min-height:'+n.h+'px';
+    // Controls
+    el.innerHTML='<div class="fc-node-controls">'+
+      '<button class="fc-node-btn" onclick="fcToggleBlank(\''+n.id+'\')">'+( n.isBlank?'📝 Text':'[Q] Blank')+'</button>'+
+      '<button class="fc-node-btn" onclick="fcDeleteNode(\''+n.id+'\')">🗑</button>'+
+      '</div>';
+    // Ports for connecting
+    ['t','r','b','l'].forEach(function(p){
+      var port=document.createElement('div');
+      port.className='fc-connect-port fc-port-'+p;
+      port.onmousedown=function(e){ e.stopPropagation(); fcStartConnect(n.id,p,e); };
+      el.appendChild(port);
+    });
+    // Content
+    var content=document.createElement('div');
+    if(n.isBlank){
+      content.innerHTML='<div class="fc-node-qnum">Q<input type="number" value="'+(n.qNum||'')+'" placeholder="?" oninput="fcUpdQ(\''+n.id+'\',this.value)" style="width:36px;border:none;background:transparent;color:var(--bl);font-weight:700;outline:none;font-size:10px"></div>'+
+        '<div style="font-size:12px;color:var(--gr)">___</div>'+
+        '<div class="fc-node-ans"><input type="text" value="'+(n.answer||'')+'" placeholder="Answer..." oninput="fcUpdAns(\''+n.id+'\',this.value)" style="width:100%;border:none;background:transparent;color:var(--gr);font-size:10px;outline:none"></div>';
+    } else {
+      content.innerHTML='<textarea class="fc-node-text" placeholder="Box text..." oninput="fcUpdTxt(\''+n.id+'\',this.value)" rows="2">'+( n.text||'')+'</textarea>';
+    }
+    el.appendChild(content);
+    // Drag
+    el.onmousedown=function(e){
+      if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.classList.contains('fc-node-btn')||e.target.classList.contains('fc-connect-port')) return;
+      fcSelected=n.id;
+      var rect=canvas.getBoundingClientRect();
+      fcDragging=n.id;
+      fcDragOffX=e.clientX-rect.left-n.x;
+      fcDragOffY=e.clientY-rect.top-n.y;
+      renderFC();
+      e.stopPropagation();
+    };
+    canvas.appendChild(el);
+  });
+  // Render arrows as SVG
+  var svgContent='';
+  fcArrows.forEach(function(a){
+    var from=fcNodes.find(function(n){return n.id===a.from;});
+    var to=fcNodes.find(function(n){return n.id===a.to;});
+    if(!from||!to) return;
+    // Calculate center points based on port
+    var fx=from.x+(a.fromPort==='r'?from.w:a.fromPort==='l'?0:from.w/2);
+    var fy=from.y+(a.fromPort==='b'?from.h:a.fromPort==='t'?0:from.h/2);
+    var tx=to.x+(a.toPort==='l'?0:a.toPort==='r'?to.w:to.w/2);
+    var ty=to.y+(a.toPort==='t'?0:a.toPort==='b'?to.h:to.h/2);
+    // Bezier curve
+    var cx1=fx+(tx-fx)*0.5, cy1=fy;
+    var cx2=fx+(tx-fx)*0.5, cy2=ty;
+    svgContent+='<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty+'" stroke="var(--bl)" stroke-width="2" fill="none" marker-end="url(#arrowhead)" onclick="fcDeleteArrow(\''+a.id+'\')" style="cursor:pointer"/>';
+  });
+  // Drawing arrow in progress
+  if(fcConnecting&&fcConnecting.endX){
+    svgContent+='<line x1="'+fcConnecting.startX+'" y1="'+fcConnecting.startY+'" x2="'+fcConnecting.endX+'" y2="'+fcConnecting.endY+'" stroke="var(--am)" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>';
+  }
+  svg.innerHTML='<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs>'+svgContent;
+  // Update canvas height
+  var maxY=400;
+  fcNodes.forEach(function(n){ maxY=Math.max(maxY,n.y+n.h+60); });
+  canvas.style.minHeight=maxY+'px';
+  svg.style.height=maxY+'px';
+}
+
+function fcMouseMove(e){
+  var canvas=document.getElementById('fc-canvas');
+  if(!canvas) return;
+  var rect=canvas.getBoundingClientRect();
+  var mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  if(fcDragging){
+    var node=fcNodes.find(function(n){return n.id===fcDragging;});
+    if(node){ node.x=Math.max(0,mx-fcDragOffX); node.y=Math.max(0,my-fcDragOffY); renderFC(); }
+  }
+  if(fcConnecting){
+    fcConnecting.endX=mx; fcConnecting.endY=my;
+    renderFC();
+  }
+}
+function fcMouseUp(e){
+  if(fcDragging){ fcDragging=null; }
+  if(fcConnecting){
+    // Check if released over a node port
+    var canvas=document.getElementById('fc-canvas');
+    var rect=canvas.getBoundingClientRect();
+    var mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    var target=null, targetPort='l';
+    fcNodes.forEach(function(n){
+      if(n.id===fcConnecting.fromId) return;
+      // Check if mouse is near node
+      if(mx>=n.x-10&&mx<=n.x+n.w+10&&my>=n.y-10&&my<=n.y+n.h+10){
+        target=n.id;
+        // Determine closest port
+        var cx=n.x+n.w/2, cy=n.y+n.h/2;
+        var dx=mx-cx, dy=my-cy;
+        if(Math.abs(dx)>Math.abs(dy)) targetPort=dx>0?'r':'l';
+        else targetPort=dy>0?'b':'t';
+      }
+    });
+    if(target){
+      fcArrows.push({id:'fca-'+(++fcArrowId),from:fcConnecting.fromId,fromPort:fcConnecting.fromPort,to:target,toPort:targetPort});
+    }
+    fcConnecting=null;
+    renderFC();
+  }
+}
+function fcCanvasClick(){ fcSelected=null; renderFC(); }
+function fcStartConnect(nodeId, port, e){
+  var canvas=document.getElementById('fc-canvas');
+  var rect=canvas.getBoundingClientRect();
+  var node=fcNodes.find(function(n){return n.id===nodeId;});
+  var sx=node.x+(port==='r'?node.w:port==='l'?0:node.w/2);
+  var sy=node.y+(port==='b'?node.h:port==='t'?0:node.h/2);
+  fcConnecting={fromId:nodeId,fromPort:port,startX:sx,startY:sy,endX:sx,endY:sy};
+}
+function fcDeleteArrow(id){ fcArrows=fcArrows.filter(function(a){return a.id!==id;}); renderFC(); }
+function fcDeleteNode(id){ fcNodes=fcNodes.filter(function(n){return n.id!==id;}); fcArrows=fcArrows.filter(function(a){return a.from!==id&&a.to!==id;}); renderFC(); }
+function fcDeleteSelected(){ if(fcSelected){ fcDeleteNode(fcSelected); fcSelected=null; } }
+function fcToggleBlank(id){ var n=fcNodes.find(function(x){return x.id===id;}); if(n){ n.isBlank=!n.isBlank; if(!n.isBlank){n.qNum=null;n.answer='';} renderFC(); } }
+function fcUpdTxt(id,val){ var n=fcNodes.find(function(x){return x.id===id;}); if(n) n.text=val; }
+function fcUpdQ(id,val){ var n=fcNodes.find(function(x){return x.id===id;}); if(n) n.qNum=parseInt(val)||null; }
+function fcUpdAns(id,val){ var n=fcNodes.find(function(x){return x.id===id;}); if(n) n.answer=val; }
+
+// Save flowchart in saveQG
+var _prevSaveQG3=saveQG;
+saveQG=function(){
+  var ty=document.getElementById('qg-ty').value;
+  var fr=parseInt(document.getElementById('qg-fr').value)||1;
+  var to=parseInt(document.getElementById('qg-to').value)||fr;
+  var ins=document.getElementById('qg-in').value.trim();
+  var wl=document.getElementById('qg-wl').value;
+  var g={type:ty,fromQ:fr,toQ:to,instruction:ins,wordLimit:wl,questions:[],
+    wordBox:qgWB.slice(),headingsList:qgHdgs.slice(),matchOptions:qgMOpts.slice(),
+    tableData:null, image:qgImg||null,
+    summaryText:null,summaryAnswers:[],
+    tableSubtype:currentTblSubtype
+  };
+  // Flowchart
+  if(ty==='flowchart'){
+    g.fcNodes=JSON.parse(JSON.stringify(fcNodes));
+    g.fcArrows=JSON.parse(JSON.stringify(fcArrows));
+    g.questions=fcNodes.filter(function(n){return n.isBlank&&n.qNum;}).map(function(n){
+      return {num:n.qNum,text:'Box Q'+n.qNum,answer:n.answer,type:'flowchart'};
+    }).sort(function(a,b){return a.num-b.num;});
+  }
+  // Table/form/note
+  if(ty==='table'||ty==='form'){
+    if(qgTD&&qgTD.rows){
+      g.tableData=flattenTableData(qgTD);
+      g.tableSubtype=currentTblSubtype;
+      // Build questions from blanks
+      var tqs=[];
+      if(qgTD.title&&qgTD.title.isBlank&&qgTD.title.qNum) tqs.push({num:qgTD.title.qNum,text:'(title)',answer:qgTD.title.answer||'',type:ty});
+      (qgTD.rows||[]).forEach(function(row){row.forEach(function(cell){var ms=(cell.text||'').match(/\[Q(\d+)\]/gi)||[];ms.forEach(function(m){var qn=parseInt(m.replace(/\[Q|\]/gi,''));var ans=(cell.answers&&cell.answers[qn])||cell.answer||'';if(!tqs.find(function(q){return q.num===qn;}))tqs.push({num:qn,text:cell.text,answer:ans,type:ty});});});});
+      tqs.sort(function(a,b){return a.num-b.num;});
+      g.questions=tqs;
+    }
+  }
+  // MCQ multi
+  if(ty==='mcq2'||ty==='mcq2r'){var ce=document.getElementById('mcq-choose'),oe=document.getElementById('mcq-opts');g.chooseN=ce?parseInt(ce.value)||2:2;g.numOptions=oe?parseInt(oe.value)||5:5;if(!ins){var lastL=LETTERS[g.numOptions-1]||'E';var cw=NUM_WORDS[g.chooseN]||g.chooseN;g.instruction='Choose **'+cw+' letters**, A–'+lastL+'.';}}
+  // Summary
+  if(ty==='summary1'||ty==='summary2'){var stxt=(document.getElementById('qg-sum-txt')||{}).value||'';g.summaryText=stxt;g.summaryAnswers=sumBlanks.slice();g.questions=sumBlanks.map(function(b){return{num:b.qNum,text:'',answer:b.answer,type:ty};});}
+  var tc=getTC();
+  if(qgCtx.mod==='listening') tc.listening.sections[qgCtx.sp].groups.push(g);
+  else tc.reading.passages[qgCtx.sp].groups.push(g);
+  closeM('qg'); showToast('Question group added!');
+  renderMod(curTOwner==='admin'?'a':'t',qgCtx.mod);
+};
+
+// Render flowchart in preview
+var _prevBuildPrevQBlock2=buildPrevQBlock;
+buildPrevQBlock=function(g,getQNum){
+  if(g.type==='flowchart'&&g.fcNodes){
+    var tl='Flow-chart Completion';
+    var h='<div class="prev-qblock"><div class="prev-qtl">'+tl+'</div>';
+    if(g.instruction) h+='<div class="prev-inst">'+renderBold(g.instruction)+(g.wordLimit?' <strong>'+g.wordLimit+'</strong>':'')+'</div>';
+    // Render flowchart as SVG with inputs
+    h+=renderFCPreview(g);
+    h+='</div>';
+    return h;
+  }
+  return _prevBuildPrevQBlock2(g,getQNum);
+};
+
+function renderFCPreview(g){
+  var nodes=g.fcNodes||[], arrows=g.fcArrows||[];
+  if(!nodes.length) return '<div style="color:var(--mu);font-size:13px">No flow-chart content.</div>';
+  // Calculate bounds
+  var maxX=400,maxY=300;
+  nodes.forEach(function(n){ maxX=Math.max(maxX,n.x+n.w+40); maxY=Math.max(maxY,n.y+n.h+40); });
+  var h='<div style="position:relative;width:100%;overflow:auto"><div style="position:relative;width:'+maxX+'px;height:'+maxY+'px">';
+  // SVG arrows
+  h+='<svg style="position:absolute;inset:0;width:'+maxX+'px;height:'+maxY+'px;pointer-events:none"><defs><marker id="ph-arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs>';
+  arrows.forEach(function(a){
+    var from=nodes.find(function(n){return n.id===a.from;});
+    var to=nodes.find(function(n){return n.id===a.to;});
+    if(!from||!to) return;
+    var fx=from.x+(a.fromPort==='r'?from.w:a.fromPort==='l'?0:from.w/2);
+    var fy=from.y+(a.fromPort==='b'?from.h:a.fromPort==='t'?0:from.h/2);
+    var tx=to.x+(a.toPort==='l'?0:a.toPort==='r'?to.w:to.w/2);
+    var ty=to.y+(a.toPort==='t'?0:a.toPort==='b'?to.h:to.h/2);
+    var cx1=fx+(tx-fx)*0.5,cy1=fy,cx2=fx+(tx-fx)*0.5,cy2=ty;
+    h+='<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty+'" stroke="var(--bl)" stroke-width="2" fill="none" marker-end="url(#ph-arrow)"/>';
+  });
+  h+='</svg>';
+  // Nodes
+  nodes.forEach(function(n){
+    h+='<div style="position:absolute;left:'+n.x+'px;top:'+n.y+'px;width:'+n.w+'px;min-height:'+n.h+'px;background:'+(n.isBlank?'var(--grl)':'#fff')+';border:2px solid '+(n.isBlank?'var(--gr)':'var(--bl)')+';border-radius:var(--r);padding:8px 10px;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.08)">';
+    if(n.isBlank&&n.qNum){
+      h+='<div style="font-size:10px;font-weight:700;color:var(--bl);margin-bottom:3px">Q'+n.qNum+'</div>';
+      h+='<input class="prev-fb" type="text" placeholder="..." oninput="prevAnswers['+n.qNum+']=this.value" style="width:100%;min-width:80px">';
+    } else {
+      h+='<div style="line-height:1.4">'+renderBold(n.text||'')+'</div>';
+    }
+    h+='</div>';
+  });
+  h+='</div></div>';
+  return h;
+}
+
+// ── FEATURE 4: RESIZABLE SPLIT in Classroom ──
+// Add divider between transcript and questions panels
+var _prevEnterClassroom2=enterClassroom;
+enterClassroom=function(testId,testData,testContent,userRole){
+  _prevEnterClassroom2(testId,testData,testContent,userRole);
+  setTimeout(function(){ addCMDivider(); },200);
+};
+
+function addCMDivider(){
+  var split=document.getElementById('cm-split');
+  if(!split||document.getElementById('cm-divider')) return;
+  var tp=document.getElementById('cm-transcript-panel');
+  var qp=document.getElementById('cm-questions-panel');
+  if(!tp||!qp) return;
+  var div=document.createElement('div');
+  div.id='cm-divider';
+  div.className='cm-divider';
+  div.title='Drag to resize panels';
+  split.insertBefore(div,qp);
+  // Drag logic
+  var dragging=false;
+  div.onmousedown=function(e){
+    dragging=true;
+    div.classList.add('dragging');
+    e.preventDefault();
+  };
+  document.onmousemove=function(e){
+    if(!dragging) return;
+    var rect=split.getBoundingClientRect();
+    var pct=((e.clientX-rect.left)/rect.width*100);
+    pct=Math.max(20,Math.min(80,pct));
+    tp.style.width=pct+'%';
+    qp.style.flex='none';
+    qp.style.width=(100-pct-0.4)+'%';
+  };
+  document.onmouseup=function(){
+    if(dragging){ dragging=false; div.classList.remove('dragging'); }
+  };
+}
+
+// Also add divider for reading split
+var _prevSwitchCMSubject=switchCMSubject;
+switchCMSubject=function(subject,el){
+  _prevSwitchCMSubject(subject,el);
+  if(subject==='reading'){
+    setTimeout(function(){
+      var split=document.querySelector('.cm-reading-split');
+      if(!split||document.getElementById('cm-rdivider')) return;
+      var pp=document.getElementById('cm-passage-panel');
+      var qp=document.getElementById('cm-reading-qs');
+      if(!pp||!qp) return;
+      var div=document.createElement('div');
+      div.id='cm-rdivider';
+      div.className='cm-divider';
+      div.title='Drag to resize panels';
+      split.insertBefore(div,qp);
+      var dragging=false;
+      div.onmousedown=function(e){ dragging=true; div.classList.add('dragging'); e.preventDefault(); };
+      document.onmousemove=function(e){
+        if(!dragging) return;
+        var rect=split.getBoundingClientRect();
+        var pct=((e.clientX-rect.left)/rect.width*100);
+        pct=Math.max(20,Math.min(80,pct));
+        pp.style.width=pct+'%';
+        qp.style.flex='none';
+        qp.style.width=(100-pct-0.4)+'%';
+      };
+      document.onmouseup=function(){ if(dragging){ dragging=false; div.classList.remove('dragging'); } };
+    },100);
+  }
+};
+
+console.log('JIC IELTS — flowchart, lightbox, table subtypes, resizable split loaded ✓');
+</script>
