@@ -7269,3 +7269,201 @@ openEditQG = function(mod, sp, gi){
 
 console.log('JIC IELTS — Matching Information paragraph dropdown loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Reorderable question groups
+//  Drag handle to move groups up/down
+// ═══════════════════════════════════════════════
+
+var reorderCSS = document.createElement('style');
+reorderCSS.textContent = `
+.qb-drag-handle {
+  cursor: grab;
+  color: var(--mu);
+  font-size: 16px;
+  padding: 0 6px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.qb-drag-handle:hover { color: var(--bl); }
+.qb-drag-handle:active { cursor: grabbing; }
+.qb.dragging-group {
+  opacity: .4;
+  border: 2px dashed var(--bl);
+}
+.qb.drag-over-group {
+  border-top: 3px solid var(--bl);
+}
+.qb-reorder-btns {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.qb-reorder-btn {
+  background: none;
+  border: 1px solid var(--bm);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  color: var(--mu);
+  line-height: 1;
+}
+.qb-reorder-btn:hover { background: var(--bg); color: var(--bl); border-color: var(--bl); }
+`;
+document.head.appendChild(reorderCSS);
+
+// Override rendQGCard to add reorder controls
+rendQGCard = function(g, gi, mod, sp){
+  var tl = (QTYPES.find(function(t){ return t.v===g.type; })||{l:g.type}).l;
+  var qCount = g.summaryText ? (g.summaryAnswers&&g.summaryAnswers.length||0) : g.questions.length;
+
+  var h = '<div class="qb" id="qg-card-'+gi+'" draggable="true" '+
+    'ondragstart="qgDragStart(event,'+gi+',\''+mod+'\','+sp+')" '+
+    'ondragover="qgDragOver(event,'+gi+')" '+
+    'ondragleave="qgDragLeave(event,'+gi+')" '+
+    'ondrop="qgDrop(event,'+gi+',\''+mod+'\','+sp+')">';
+
+  // Header
+  h += '<div class="qb-hdr" onclick="togQB(this)">'+
+    '<span class="qb-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">⠿</span>'+
+    '<div class="qb-num">'+(gi+1)+'</div>'+
+    '<div class="qb-title">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>'+
+    '<span class="qtb">'+qCount+' q(s)</span>'+
+    '<div style="margin-left:auto;display:flex;gap:4px;align-items:center">'+
+    // Up/Down buttons
+    '<div class="qb-reorder-btns" onclick="event.stopPropagation()">'+
+    '<button class="qb-reorder-btn" title="Move up" onclick="moveQG(\''+mod+'\','+sp+','+gi+',-1)">▲</button>'+
+    '<button class="qb-reorder-btn" title="Move down" onclick="moveQG(\''+mod+'\','+sp+','+gi+',1)">▼</button>'+
+    '</div>'+
+    '<button class="btn btn-sm" onclick="event.stopPropagation();openEditQG(\''+mod+'\','+sp+','+gi+')">✏️ Edit</button>'+
+    '<button class="btn btn-sm btn-d" onclick="event.stopPropagation();rmQG(\''+mod+'\','+sp+','+gi+')">🗑</button>'+
+    '</div></div>';
+
+  // Body
+  h += '<div class="qb-body">';
+  h += '<div style="font-size:12px;color:var(--mu);margin-bottom:6px">'+
+    renderBold(g.instruction||'')+(g.wordLimit?' · <strong>'+g.wordLimit+'</strong>':'')+'</div>';
+
+  if(g.summaryText){
+    var prevTxt = renderBold(g.summaryText).replace(/\[Q(\d+)\]/gi,function(m,qn){
+      return '<span style="background:var(--bll);color:var(--bl);font-weight:700;padding:1px 6px;border-radius:4px;font-size:12px">Q'+qn+'</span>';
+    });
+    h += '<div style="font-size:13px;line-height:2;padding:10px;background:var(--bg);border-radius:var(--r);border-left:3px solid var(--bl);margin-bottom:8px">'+prevTxt+'</div>';
+    if(g.summaryAnswers&&g.summaryAnswers.length){
+      h += '<div style="font-size:12px;color:var(--mu)">Answers: '+
+        g.summaryAnswers.map(function(b){ return '<span class="tag">Q'+b.qNum+': '+b.answer+'</span>'; }).join('')+'</div>';
+    }
+  } else if(g.type==='flowchart'&&g.fcNodes){
+    h += '<div style="font-size:12px;color:var(--mu);margin-bottom:6px">'+
+      g.fcNodes.length+' box(es), '+g.fcArrows.length+' arrow(s)</div>';
+    // Mini preview
+    h += '<div style="font-size:12px;color:var(--mu)">Blanks: '+
+      g.questions.map(function(q){ return '<span class="tag">Q'+q.num+': '+q.answer+'</span>'; }).join('')+'</div>';
+  } else if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:120px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:8px;cursor:zoom-in" onclick="openLB(this.src)">';
+  } else if((g.type==='table'||g.type==='form')&&g.tableData){
+    h += rendTblPrev(g.tableData);
+  }
+
+  if(g.wordBox&&g.wordBox.length)
+    h += '<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Word box: '+
+      g.wordBox.map(function(w){ return '<span class="tag">'+w+'</span>'; }).join('')+'</div>';
+  if(g.headingsList&&g.headingsList.length)
+    h += '<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Headings: '+g.headingsList.length+' items</div>';
+  if(g.matchOptions&&g.matchOptions.length)
+    h += '<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Options: '+
+      g.matchOptions.map(function(m){ return m.letter+'. '+m.text; }).join(', ')+'</div>';
+  if(g.minfoParaLabels&&g.minfoParaLabels.length)
+    h += '<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Paragraphs: '+
+      g.minfoParaLabels.join(', ')+'</div>';
+
+  // Questions list (non-summary types)
+  if(!g.summaryText && g.type!=='flowchart'){
+    h += '<div>';
+    g.questions.forEach(function(q, qi){
+      h += '<div class="q-item"><div class="q-item-h">'+
+        '<div class="q-item-num">'+q.num+'</div>'+
+        '<div style="flex:1;font-size:13px">'+renderBold(q.text||'')+(q.answer?'<span style="color:var(--gr);margin-left:8px;font-size:11px">✓ '+q.answer+'</span>':'')+'</div>'+
+        '<button class="btn btn-sm" style="margin-right:4px" onclick="openEditQ(\''+mod+'\','+sp+','+gi+','+qi+')">✏️</button>'+
+        '<button class="btn btn-sm btn-d" onclick="rmQ(\''+mod+'\','+sp+','+gi+','+qi+')">🗑</button>'+
+        '</div></div>';
+    });
+    h += '</div>';
+    if(g.type!=='table'&&g.type!=='form'){
+      h += '<button class="btn btn-p btn-sm" style="margin-top:8px" onclick="openQ(\''+mod+'\','+sp+','+gi+')">+ Add question</button>';
+    }
+  }
+
+  h += '</div></div>';
+  return h;
+};
+
+// ── Move up/down buttons ──
+function moveQG(mod, sp, gi, dir){
+  var tc = getTC();
+  var groups = mod==='listening' ?
+    tc.listening.sections[sp].groups :
+    tc.reading.passages[sp].groups;
+  var newIdx = gi + dir;
+  if(newIdx < 0 || newIdx >= groups.length) return;
+  // Swap
+  var tmp = groups[gi];
+  groups[gi] = groups[newIdx];
+  groups[newIdx] = tmp;
+  renderMod(curTOwner==='admin'?'a':'t', mod);
+  showToast('Group moved '+(dir===-1?'up':'down')+'!');
+}
+
+// ── Drag and drop reorder ──
+var qgDragSrcIdx = null;
+var qgDragMod = null;
+var qgDragSp = null;
+
+function qgDragStart(e, gi, mod, sp){
+  qgDragSrcIdx = gi;
+  qgDragMod = mod;
+  qgDragSp = sp;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', gi);
+  setTimeout(function(){
+    var el = document.getElementById('qg-card-'+gi);
+    if(el) el.classList.add('dragging-group');
+  }, 0);
+}
+
+function qgDragOver(e, gi){
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Visual indicator
+  document.querySelectorAll('.qb').forEach(function(el){ el.classList.remove('drag-over-group'); });
+  var el = document.getElementById('qg-card-'+gi);
+  if(el && gi !== qgDragSrcIdx) el.classList.add('drag-over-group');
+}
+
+function qgDragLeave(e, gi){
+  var el = document.getElementById('qg-card-'+gi);
+  if(el) el.classList.remove('drag-over-group');
+}
+
+function qgDrop(e, gi, mod, sp){
+  e.preventDefault();
+  document.querySelectorAll('.qb').forEach(function(el){
+    el.classList.remove('drag-over-group');
+    el.classList.remove('dragging-group');
+  });
+  if(qgDragSrcIdx === null || qgDragSrcIdx === gi) return;
+  // Reorder
+  var tc = getTC();
+  var groups = mod==='listening' ?
+    tc.listening.sections[sp].groups :
+    tc.reading.passages[sp].groups;
+  var moved = groups.splice(qgDragSrcIdx, 1)[0];
+  groups.splice(gi, 0, moved);
+  qgDragSrcIdx = null;
+  renderMod(curTOwner==='admin'?'a':'t', mod);
+  showToast('Question groups reordered!');
+}
+
+console.log('JIC IELTS — reorderable question groups loaded ✓');
+</script>
