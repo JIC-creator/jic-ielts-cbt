@@ -6368,3 +6368,336 @@ fcDeleteNode = function(id){
 
 console.log('JIC IELTS — merged table type + flowchart fixes loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Flowchart — unified box type
+//  All boxes use [Q11] markers like table
+//  Answer key appears below canvas
+// ═══════════════════════════════════════════════
+
+// Reset flowchart state
+fcNodes = [];
+fcArrows = [];
+fcNodeId = 0;
+fcArrowId = 0;
+fcDragging = null;
+fcConnecting = null;
+fcSelected = null;
+
+// Override buildFCEditor — single box type
+buildFCEditor = function(){
+  return '<div class="fc-toolbar">'+
+    '<button class="btn btn-sm btn-p" onclick="fcAddNode()">+ Add box</button>'+
+    '<button class="btn btn-sm btn-d" onclick="fcDeleteSelected()">🗑 Delete selected</button>'+
+    '<div style="font-size:11px;color:var(--mu);display:flex;align-items:center;margin-left:8px">'+
+    '💡 Type <strong>[Q11]</strong> inside a box for a blank. Hover edges to draw arrows.</div>'+
+    '</div>'+
+    '<div class="fc-canvas-wrap">'+
+    '<svg id="fc-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1">'+
+    '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'+
+    '<polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs></svg>'+
+    '<div class="fc-canvas" id="fc-canvas" '+
+    'onclick="fcCanvasClick(event)" '+
+    'onmousemove="fcMouseMove(event)" '+
+    'onmouseup="fcMouseUp(event)"></div></div>'+
+    '<div id="fc-ans-section" style="margin-top:12px"></div>';
+};
+
+// Add box — single unified type
+fcAddNode = function(){
+  var id='fcn-'+(++fcNodeId);
+  var node={
+    id:id, text:'',
+    x:40+(fcNodes.length%4)*160,
+    y:40+Math.floor(fcNodes.length/4)*120,
+    w:150, h:70
+  };
+  fcNodes.push(node);
+  renderFC();
+};
+
+// Main render — no re-render on keystroke
+renderFC = function(){
+  var canvas=document.getElementById('fc-canvas');
+  var svg=document.getElementById('fc-svg');
+  if(!canvas||!svg) return;
+
+  // ── SVG arrows ──
+  var svgContent='<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs>';
+  fcArrows.forEach(function(a){
+    var from=fcNodes.find(function(n){return n.id===a.from;});
+    var to=fcNodes.find(function(n){return n.id===a.to;});
+    if(!from||!to) return;
+    var fx=from.x+(a.fromPort==='r'?from.w:a.fromPort==='l'?0:from.w/2);
+    var fy=from.y+(a.fromPort==='b'?from.h:a.fromPort==='t'?0:from.h/2);
+    var tx=to.x+(a.toPort==='l'?0:a.toPort==='r'?to.w:to.w/2);
+    var ty2=to.y+(a.toPort==='t'?0:a.toPort==='b'?to.h:to.h/2);
+    var cx1=fx+(tx-fx)*0.5, cy1=fy;
+    var cx2=fx+(tx-fx)*0.5, cy2=ty2;
+    svgContent+='<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty2+'" '+
+      'stroke="var(--bl)" stroke-width="2" fill="none" marker-end="url(#arrowhead)" '+
+      'data-arrow="'+a.id+'" style="cursor:pointer;pointer-events:all"/>';
+  });
+  // In-progress arrow
+  if(fcConnecting&&fcConnecting.endX!==undefined){
+    svgContent+='<line x1="'+fcConnecting.startX+'" y1="'+fcConnecting.startY+'" '+
+      'x2="'+fcConnecting.endX+'" y2="'+fcConnecting.endY+'" '+
+      'stroke="var(--am)" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>';
+  }
+  svg.innerHTML=svgContent;
+  // Arrow click to delete
+  svg.querySelectorAll('path[data-arrow]').forEach(function(p){
+    p.onclick=function(e){ e.stopPropagation(); fcDeleteArrow(this.dataset.arrow); };
+  });
+
+  // ── Nodes ──
+  fcNodes.forEach(function(n){
+    var existing=document.getElementById(n.id);
+    if(existing){
+      // Update position + selection only — don't touch content
+      existing.style.left=n.x+'px';
+      existing.style.top=n.y+'px';
+      existing.classList.toggle('selected', fcSelected===n.id);
+      // Update border color based on whether it has blanks
+      var hasBlank=/\[Q\d+\]/i.test(n.text||'');
+      existing.style.borderColor=hasBlank?'var(--gr)':'var(--bl)';
+      existing.style.background=hasBlank?'var(--grl)':'#fff';
+    } else {
+      // Build new node
+      var el=document.createElement('div');
+      el.id=n.id;
+      var hasBlank=/\[Q\d+\]/i.test(n.text||'');
+      el.className='fc-node'+(fcSelected===n.id?' selected':'');
+      el.style.cssText='left:'+n.x+'px;top:'+n.y+'px;width:'+n.w+'px;min-height:'+n.h+'px;'+
+        'position:absolute;background:'+(hasBlank?'var(--grl)':'#fff')+';'+
+        'border-color:'+(hasBlank?'var(--gr)':'var(--bl)');
+
+      // Controls
+      var ctrl=document.createElement('div');
+      ctrl.className='fc-node-controls';
+      ctrl.innerHTML=
+        '<button class="fc-node-btn" onclick="fcDeleteNode(\''+n.id+'\')">🗑 Delete</button>';
+      el.appendChild(ctrl);
+
+      // Connection ports
+      ['t','r','b','l'].forEach(function(p){
+        var port=document.createElement('div');
+        port.className='fc-connect-port fc-port-'+p;
+        port.title='Drag to connect';
+        port.onmousedown=function(e){
+          e.stopPropagation();
+          fcStartConnect(n.id,p,e);
+        };
+        el.appendChild(port);
+      });
+
+      // Textarea for content — NO oninput re-render
+      var ta=document.createElement('textarea');
+      ta.className='fc-node-text';
+      ta.placeholder='Box text... use [Q11] for a blank';
+      ta.rows=3;
+      ta.value=n.text||'';
+      ta.style.cssText='width:100%;border:none;background:transparent;font-size:12px;'+
+        'font-family:inherit;outline:none;resize:none;line-height:1.5;cursor:text';
+      // Only update data on input — no DOM re-render
+      ta.oninput=function(){
+        n.text=this.value;
+        // Update box color based on [Qn] presence
+        var hb=/\[Q\d+\]/i.test(this.value);
+        el.style.borderColor=hb?'var(--gr)':'var(--bl)';
+        el.style.background=hb?'var(--grl)':'#fff';
+      };
+      // On blur — update answer fields below canvas
+      ta.onblur=function(){
+        n.text=this.value;
+        updateFCAnswerFields();
+      };
+      el.appendChild(ta);
+
+      // Drag to move
+      el.onmousedown=function(e){
+        if(e.target.tagName==='TEXTAREA'||
+           e.target.tagName==='INPUT'||
+           e.target.classList.contains('fc-node-btn')||
+           e.target.classList.contains('fc-connect-port')) return;
+        fcSelected=n.id;
+        document.querySelectorAll('.fc-node').forEach(function(x){ x.classList.remove('selected'); });
+        el.classList.add('selected');
+        var rect=canvas.getBoundingClientRect();
+        fcDragging=n.id;
+        fcDragOffX=e.clientX-rect.left-n.x;
+        fcDragOffY=e.clientY-rect.top-n.y;
+        e.stopPropagation();
+      };
+      canvas.appendChild(el);
+    }
+  });
+
+  // Remove deleted nodes
+  canvas.querySelectorAll('.fc-node').forEach(function(el){
+    if(!fcNodes.find(function(n){return n.id===el.id;}))
+      el.parentNode.removeChild(el);
+  });
+
+  // Canvas height
+  var maxY=360;
+  fcNodes.forEach(function(n){ maxY=Math.max(maxY,n.y+n.h+60); });
+  canvas.style.minHeight=maxY+'px';
+  svg.style.height=maxY+'px';
+
+  // Update answer fields
+  updateFCAnswerFields();
+};
+
+// Collect all [Qn] markers from all boxes and show answer fields
+function updateFCAnswerFields(){
+  var sec=document.getElementById('fc-ans-section');
+  if(!sec) return;
+  // Collect all blanks across all nodes
+  var blanks=[];
+  fcNodes.forEach(function(n){
+    var matches=(n.text||'').match(/\[Q(\d+)\]/gi)||[];
+    matches.forEach(function(m){
+      var qn=parseInt(m.replace(/\[Q|\]/gi,''));
+      if(!blanks.find(function(b){return b.qNum===qn;})){
+        blanks.push({qNum:qn, answer:n.answers&&n.answers[qn]||''});
+      }
+    });
+  });
+  blanks.sort(function(a,b){return a.qNum-b.qNum;});
+  if(!blanks.length){
+    sec.innerHTML='<div style="font-size:11px;color:var(--mu);padding:8px;background:var(--bg);border-radius:var(--r)">'+
+      'No [Qn] markers found yet. Type [Q11], [Q12] etc. inside boxes to add blanks.</div>';
+    return;
+  }
+  sec.innerHTML='<label class="fl">Answer key for blanks</label>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
+    blanks.map(function(b){
+      return '<div style="display:flex;align-items:center;gap:8px">'+
+        '<div style="width:34px;height:34px;border-radius:50%;background:var(--bll);color:var(--bl);'+
+        'display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">Q'+b.qNum+'</div>'+
+        '<input class="inp" value="'+(b.answer||'')+'" placeholder="Answer for Q'+b.qNum+'..." '+
+        'oninput="saveFCAns('+b.qNum+',this.value)">'+
+        '</div>';
+    }).join('')+
+    '</div>';
+}
+
+// Save answer for a flowchart blank
+function saveFCAns(qNum, val){
+  // Find which node contains this Qn and save answer there
+  fcNodes.forEach(function(n){
+    if((n.text||'').match(new RegExp('\\[Q'+qNum+'\\]','i'))){
+      if(!n.answers) n.answers={};
+      n.answers[qNum]=val;
+    }
+  });
+}
+
+// Override fcDeleteNode for clean removal
+fcDeleteNode = function(id){
+  fcNodes=fcNodes.filter(function(n){return n.id!==id;});
+  fcArrows=fcArrows.filter(function(a){return a.from!==id&&a.to!==id;});
+  var el=document.getElementById(id);
+  if(el) el.parentNode.removeChild(el);
+  renderFC();
+};
+
+// Override saveQG to collect flowchart answers properly
+var _prevSaveQG4=saveQG;
+saveQG=function(){
+  var ty=document.getElementById('qg-ty').value;
+  if(ty!=='flowchart'){ _prevSaveQG4(); return; }
+
+  var fr=parseInt(document.getElementById('qg-fr').value)||1;
+  var to=parseInt(document.getElementById('qg-to').value)||fr;
+  var ins=document.getElementById('qg-in').value.trim();
+  var wl=document.getElementById('qg-wl').value;
+
+  // Collect current textarea values from DOM
+  fcNodes.forEach(function(n){
+    var ta=document.querySelector('#'+n.id+' textarea');
+    if(ta) n.text=ta.value;
+  });
+
+  // Build questions from [Qn] markers
+  var blanks=[];
+  fcNodes.forEach(function(n){
+    var matches=(n.text||'').match(/\[Q(\d+)\]/gi)||[];
+    matches.forEach(function(m){
+      var qn=parseInt(m.replace(/\[Q|\]/gi,''));
+      var ans=(n.answers&&n.answers[qn])||'';
+      if(!blanks.find(function(b){return b.qNum===qn;}))
+        blanks.push({num:qn, text:n.text, answer:ans, type:'flowchart'});
+    });
+  });
+  blanks.sort(function(a,b){return a.num-b.num;});
+
+  var g={
+    type:'flowchart', fromQ:fr, toQ:to,
+    instruction:ins, wordLimit:wl,
+    questions:blanks,
+    wordBox:[], headingsList:[], matchOptions:[],
+    tableData:null, image:null,
+    summaryText:null, summaryAnswers:[],
+    fcNodes:JSON.parse(JSON.stringify(fcNodes)),
+    fcArrows:JSON.parse(JSON.stringify(fcArrows))
+  };
+
+  var tc=getTC();
+  if(qgCtx.mod==='listening') tc.listening.sections[qgCtx.sp].groups.push(g);
+  else tc.reading.passages[qgCtx.sp].groups.push(g);
+  // Reset fc state
+  fcNodes=[]; fcArrows=[];
+  closeM('qg');
+  showToast('Flow-chart group added!');
+  renderMod(curTOwner==='admin'?'a':'t',qgCtx.mod);
+};
+
+// Preview — update renderFCPreview to use [Qn] style
+renderFCPreview = function(g){
+  var nodes=g.fcNodes||[], arrows=g.fcArrows||[];
+  if(!nodes.length) return '<div style="color:var(--mu);font-size:13px">No flow-chart content.</div>';
+  var maxX=400, maxY=300;
+  nodes.forEach(function(n){ maxX=Math.max(maxX,n.x+n.w+40); maxY=Math.max(maxY,n.y+n.h+40); });
+  var h='<div style="position:relative;overflow:auto;background:#f8f8f6;border-radius:var(--r);border:1px solid var(--b);padding:10px">'+
+    '<div style="position:relative;width:'+maxX+'px;height:'+maxY+'px">';
+  // SVG
+  h+='<svg style="position:absolute;inset:0;width:'+maxX+'px;height:'+maxY+'px;pointer-events:none">'+
+    '<defs><marker id="pv-arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'+
+    '<polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs>';
+  arrows.forEach(function(a){
+    var from=nodes.find(function(n){return n.id===a.from;});
+    var to=nodes.find(function(n){return n.id===a.to;});
+    if(!from||!to) return;
+    var fx=from.x+(a.fromPort==='r'?from.w:a.fromPort==='l'?0:from.w/2);
+    var fy=from.y+(a.fromPort==='b'?from.h:a.fromPort==='t'?0:from.h/2);
+    var tx=to.x+(a.toPort==='l'?0:a.toPort==='r'?to.w:to.w/2);
+    var ty2=to.y+(a.toPort==='t'?0:a.toPort==='b'?to.h:to.h/2);
+    var cx1=fx+(tx-fx)*0.5,cy1=fy,cx2=fx+(tx-fx)*0.5,cy2=ty2;
+    h+='<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty2+'" stroke="var(--bl)" stroke-width="2" fill="none" marker-end="url(#pv-arr)"/>';
+  });
+  h+='</svg>';
+  // Nodes
+  nodes.forEach(function(n){
+    var hasBlank=/\[Q\d+\]/i.test(n.text||'');
+    h+='<div style="position:absolute;left:'+n.x+'px;top:'+n.y+'px;width:'+n.w+'px;min-height:'+n.h+'px;'+
+      'background:'+(hasBlank?'var(--grl)':'#fff')+';border:2px solid '+(hasBlank?'var(--gr)':'var(--bl)')+';'+
+      'border-radius:var(--r);padding:8px 10px;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);line-height:1.6">';
+    // Replace [Qn] with input boxes
+    var cellHtml=(n.text||'').replace(/\[Q(\d+)\]/gi,function(m,qn){
+      var num=parseInt(qn);
+      return '<span style="font-size:10px;font-weight:700;color:var(--bl);margin-right:2px">'+num+'</span>'+
+        '<input class="prev-fb" type="text" placeholder="..." '+
+        'oninput="prevAnswers['+num+']=this.value" '+
+        'style="min-width:80px;max-width:120px">';
+    });
+    cellHtml=renderBold(cellHtml).replace(/\n/g,'<br>');
+    h+=cellHtml+'</div>';
+  });
+  h+='</div></div>';
+  return h;
+};
+
+console.log('JIC IELTS — unified flowchart box type loaded ✓');
+</script>
