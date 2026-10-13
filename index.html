@@ -6140,3 +6140,231 @@ switchCMSubject=function(subject,el){
 
 console.log('JIC IELTS — flowchart, lightbox, table subtypes, resizable split loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Merge table/form/note into one type
+//  FIX: Remove sub-type from flowchart
+//  FIX: Typing inside flowchart boxes
+// ═══════════════════════════════════════════════
+
+// ── FIX 1: Update QTYPES — merge table/form/note ──
+// Remove old separate entries and replace with one
+QTYPES = QTYPES.filter(function(t){
+  return t.v !== 'note' && t.v !== 'form' && t.v !== 'table';
+});
+// Add merged type at the right position
+// Find flowchart position and insert before it
+var fcIdx = QTYPES.findIndex(function(t){ return t.v === 'flowchart'; });
+if(fcIdx >= 0){
+  QTYPES.splice(fcIdx, 0, {v:'table', l:'Note, Form or Table Completion', mod:'both'});
+} else {
+  QTYPES.unshift({v:'table', l:'Note, Form or Table Completion', mod:'both'});
+}
+
+// ── FIX 2: Fix onQGTy to not show sub-type for flowchart ──
+onQGTy = function(){
+  var t=document.getElementById('qg-ty'); if(!t) return;
+  var v=t.value;
+  var isTbl = v==='table';
+  var isFlow = v==='flowchart';
+  var isDiag = v==='diagram';
+  var isWB = v==='summary2';
+  var isHdg = v==='mheading';
+  var isMO = v==='matching'||v==='mfeature'||v==='sendend';
+  var isSummary = v==='summary1'||v==='summary2';
+  var isMulti = v==='mcq2'||v==='mcq2r';
+
+  // Table builder — only for table type
+  var tblEl=document.getElementById('qg-tbl');
+  if(tblEl) tblEl.style.display=isTbl?'block':'none';
+
+  // Sub-type selector — only for table, NOT flowchart
+  var stEl=document.getElementById('qg-tbl-subtype');
+  if(stEl) stEl.style.display=isTbl?'block':'none';
+
+  // Flowchart builder — only for flowchart
+  var fcEl=document.getElementById('qg-flowchart');
+  if(fcEl) fcEl.style.display=isFlow?'block':'none';
+
+  // Image upload — for diagram
+  var imgEl=document.getElementById('qg-img');
+  if(imgEl) imgEl.style.display=isDiag?'block':'none';
+
+  // Word box — for summary2
+  var wbEl=document.getElementById('qg-wb');
+  if(wbEl) wbEl.style.display=isWB?'block':'none';
+
+  // Headings — for mheading
+  var hdgEl=document.getElementById('qg-hdgs');
+  if(hdgEl) hdgEl.style.display=isHdg?'block':'none';
+
+  // Match options
+  var moEl=document.getElementById('qg-mopts');
+  if(moEl) moEl.style.display=isMO?'block':'none';
+
+  // Summary paragraph
+  var spEl=document.getElementById('qg-summary-para');
+  if(spEl) spEl.style.display=isSummary?'block':'none';
+
+  // MCQ multi settings
+  var mmEl=document.getElementById('qg-mcq-multi');
+  if(mmEl) mmEl.style.display=isMulti?'block':'none';
+
+  // Note for non-special types
+  var noteEl=document.getElementById('qg-q-note');
+  if(noteEl) noteEl.style.display=(isSummary||isTbl||isFlow)?'none':'block';
+
+  // Init flowchart if switching to it
+  if(isFlow && (!fcNodes||!fcNodes.length)){
+    fcNodes=[]; fcArrows=[];
+    setTimeout(function(){ renderFC(); }, 50);
+  }
+};
+
+// ── FIX 3: Flowchart box typing — no re-render on input ──
+// Completely rewrite renderFC to use event delegation
+// and NOT re-render on every keystroke
+
+renderFC = function(){
+  var canvas=document.getElementById('fc-canvas');
+  var svg=document.getElementById('fc-svg');
+  if(!canvas||!svg) return;
+
+  // Only rebuild DOM for nodes that changed structure
+  // First render arrows (always redraw SVG)
+  var svgContent='';
+  fcArrows.forEach(function(a){
+    var from=fcNodes.find(function(n){return n.id===a.from;});
+    var to=fcNodes.find(function(n){return n.id===a.to;});
+    if(!from||!to) return;
+    var fx=from.x+(a.fromPort==='r'?from.w:a.fromPort==='l'?0:from.w/2);
+    var fy=from.y+(a.fromPort==='b'?from.h:a.fromPort==='t'?0:from.h/2);
+    var tx=to.x+(a.toPort==='l'?0:a.toPort==='r'?to.w:to.w/2);
+    var ty=to.y+(a.toPort==='t'?0:a.toPort==='b'?to.h:to.h/2);
+    var cx1=fx+(tx-fx)*0.5,cy1=fy,cx2=fx+(tx-fx)*0.5,cy2=ty;
+    svgContent+='<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty+'" stroke="var(--bl)" stroke-width="2" fill="none" marker-end="url(#arrowhead)" data-arrow="'+a.id+'" style="cursor:pointer;pointer-events:all"/>';
+  });
+  if(fcConnecting&&fcConnecting.endX){
+    svgContent+='<line x1="'+fcConnecting.startX+'" y1="'+fcConnecting.startY+'" x2="'+fcConnecting.endX+'" y2="'+fcConnecting.endY+'" stroke="var(--am)" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>';
+  }
+  svg.innerHTML='<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs>'+svgContent;
+
+  // Arrow click handler
+  svg.querySelectorAll('path[data-arrow]').forEach(function(p){
+    p.onclick=function(e){ e.stopPropagation(); fcDeleteArrow(this.dataset.arrow); };
+  });
+
+  // Render nodes — check if node element already exists, only update position and selection
+  fcNodes.forEach(function(n){
+    var existing=document.getElementById(n.id);
+    if(existing){
+      // Just update position and selection class
+      existing.style.left=n.x+'px';
+      existing.style.top=n.y+'px';
+      existing.classList.toggle('selected', fcSelected===n.id);
+      existing.classList.toggle('blank-node', !!n.isBlank);
+    } else {
+      // Create new node element
+      var el=document.createElement('div');
+      el.className='fc-node'+(n.isBlank?' blank-node':'')+(fcSelected===n.id?' selected':'');
+      el.id=n.id;
+      el.style.cssText='left:'+n.x+'px;top:'+n.y+'px;width:'+n.w+'px;min-height:'+n.h+'px;position:absolute';
+
+      // Controls bar
+      var ctrl=document.createElement('div');
+      ctrl.className='fc-node-controls';
+      ctrl.innerHTML=
+        '<button class="fc-node-btn" onclick="fcToggleBlank(\''+n.id+'\')">'+( n.isBlank?'📝 Text':'[Q] Blank')+'</button>'+
+        '<button class="fc-node-btn" onclick="fcDeleteNode(\''+n.id+'\')">🗑</button>';
+      el.appendChild(ctrl);
+
+      // Connection ports
+      ['t','r','b','l'].forEach(function(p){
+        var port=document.createElement('div');
+        port.className='fc-connect-port fc-port-'+p;
+        port.onmousedown=function(e){
+          e.stopPropagation();
+          fcStartConnect(n.id,p,e);
+        };
+        el.appendChild(port);
+      });
+
+      // Content area
+      var content=document.createElement('div');
+      content.className='fc-content';
+      if(n.isBlank){
+        content.innerHTML=
+          '<div class="fc-node-qnum">Q<input type="number" value="'+(n.qNum||'')+'" placeholder="?" '+
+          'style="width:36px;border:none;background:transparent;color:var(--bl);font-weight:700;outline:none;font-size:10px" '+
+          'oninput="fcUpdQ(\''+n.id+'\',this.value)"></div>'+
+          '<div style="font-size:12px;color:var(--gr);margin:2px 0">___</div>'+
+          '<div class="fc-node-ans"><input type="text" value="'+(n.answer||'')+'" placeholder="Answer..." '+
+          'style="width:100%;border:none;border-bottom:1px solid var(--gr);background:transparent;color:var(--gr);font-size:10px;outline:none;padding:1px 0" '+
+          'oninput="fcUpdAns(\''+n.id+'\',this.value)"></div>';
+      } else {
+        // Use textarea — NO oninput re-render, use onblur only
+        var ta=document.createElement('textarea');
+        ta.className='fc-node-text';
+        ta.placeholder='Box text...';
+        ta.rows=2;
+        ta.value=n.text||'';
+        ta.oninput=function(){ fcUpdTxt(n.id,this.value); }; // just update data, no re-render
+        content.appendChild(ta);
+      }
+      el.appendChild(content);
+
+      // Drag handling
+      el.onmousedown=function(e){
+        if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||
+           e.target.classList.contains('fc-node-btn')||
+           e.target.classList.contains('fc-connect-port')) return;
+        fcSelected=n.id;
+        // Update selection visually without full re-render
+        document.querySelectorAll('.fc-node').forEach(function(x){ x.classList.remove('selected'); });
+        el.classList.add('selected');
+        var rect=canvas.getBoundingClientRect();
+        fcDragging=n.id;
+        fcDragOffX=e.clientX-rect.left-n.x;
+        fcDragOffY=e.clientY-rect.top-n.y;
+        e.stopPropagation();
+      };
+      canvas.appendChild(el);
+    }
+  });
+
+  // Remove deleted nodes from DOM
+  canvas.querySelectorAll('.fc-node').forEach(function(el){
+    if(!fcNodes.find(function(n){return n.id===el.id;})){
+      el.parentNode.removeChild(el);
+    }
+  });
+
+  // Update canvas height
+  var maxY=400;
+  fcNodes.forEach(function(n){ maxY=Math.max(maxY,n.y+n.h+60); });
+  canvas.style.minHeight=maxY+'px';
+  svg.style.height=maxY+'px';
+};
+
+// fcToggleBlank needs full re-render since structure changes
+fcToggleBlank = function(id){
+  var n=fcNodes.find(function(x){return x.id===id;});
+  if(!n) return;
+  n.isBlank=!n.isBlank;
+  if(!n.isBlank){n.qNum=null;n.answer='';}
+  // Remove existing DOM node so it gets rebuilt
+  var existing=document.getElementById(id);
+  if(existing) existing.parentNode.removeChild(existing);
+  renderFC();
+};
+
+fcDeleteNode = function(id){
+  fcNodes=fcNodes.filter(function(n){return n.id!==id;});
+  fcArrows=fcArrows.filter(function(a){return a.from!==id&&a.to!==id;});
+  var existing=document.getElementById(id);
+  if(existing) existing.parentNode.removeChild(existing);
+  renderFC();
+};
+
+console.log('JIC IELTS — merged table type + flowchart fixes loaded ✓');
+</script>
