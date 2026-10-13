@@ -6701,3 +6701,324 @@ renderFCPreview = function(g){
 
 console.log('JIC IELTS — unified flowchart box type loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Flowchart — delete arrows, resize boxes,
+//  bold text support
+// ═══════════════════════════════════════════════
+
+// ── CSS for resize handle and selected arrow ──
+var fcFixCSS = document.createElement('style');
+fcFixCSS.textContent = `
+.fc-resize-handle {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  background: var(--bl);
+  border-radius: 2px;
+  cursor: se-resize;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.fc-node:hover .fc-resize-handle,
+.fc-node.selected .fc-resize-handle { opacity: 1; }
+.fc-arrow-selected { stroke: var(--am) !important; stroke-width: 3 !important; }
+.fc-arrow-delete-btn {
+  position: fixed;
+  background: var(--rdl);
+  border: 1px solid var(--rd);
+  color: var(--rd);
+  border-radius: var(--r);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  z-index: 999;
+  display: none;
+  font-family: inherit;
+}
+.fc-node-text {
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+}
+.fc-bold-hint {
+  font-size: 10px;
+  color: var(--mu);
+  margin-top: 4px;
+  font-style: italic;
+}
+`;
+document.head.appendChild(fcFixCSS);
+
+// Add delete button for arrows to DOM
+var fcArrDelBtn = document.createElement('button');
+fcArrDelBtn.className = 'fc-arrow-delete-btn';
+fcArrDelBtn.id = 'fc-arr-del';
+fcArrDelBtn.innerHTML = '🗑 Delete arrow';
+document.body.appendChild(fcArrDelBtn);
+
+var fcSelectedArrow = null;
+
+// Override renderFC with resize handle + arrow selection
+renderFC = function(){
+  var canvas = document.getElementById('fc-canvas');
+  var svg = document.getElementById('fc-svg');
+  if(!canvas || !svg) return;
+
+  // ── SVG arrows ──
+  var svgContent = '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'+
+    '<polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker>'+
+    '<marker id="arrowhead-sel" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'+
+    '<polygon points="0 0, 10 3.5, 0 7" fill="var(--am)"/></marker></defs>';
+
+  fcArrows.forEach(function(a){
+    var from = fcNodes.find(function(n){ return n.id===a.from; });
+    var to = fcNodes.find(function(n){ return n.id===a.to; });
+    if(!from || !to) return;
+    var fx = from.x + (a.fromPort==='r'?from.w : a.fromPort==='l'?0 : from.w/2);
+    var fy = from.y + (a.fromPort==='b'?from.h : a.fromPort==='t'?0 : from.h/2);
+    var tx = to.x + (a.toPort==='l'?0 : a.toPort==='r'?to.w : to.w/2);
+    var ty = to.y + (a.toPort==='t'?0 : a.toPort==='b'?to.h : to.h/2);
+    var cx1=fx+(tx-fx)*0.5, cy1=fy, cx2=fx+(tx-fx)*0.5, cy2=ty;
+    var isSel = fcSelectedArrow===a.id;
+    svgContent += '<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty+'" '+
+      'stroke="'+(isSel?'var(--am)':'var(--bl)')+'" stroke-width="'+(isSel?3:2)+'" fill="none" '+
+      'marker-end="url(#'+(isSel?'arrowhead-sel':'arrowhead')+')" '+
+      // Wider invisible hit area
+      'style="cursor:pointer;pointer-events:stroke" '+
+      'stroke-linecap="round" '+
+      'data-arrow="'+a.id+'"/>';
+    // Invisible wider path for easier clicking
+    svgContent += '<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty+'" '+
+      'stroke="transparent" stroke-width="12" fill="none" '+
+      'style="cursor:pointer;pointer-events:stroke" '+
+      'data-arrow-hit="'+a.id+'"/>';
+  });
+  // In-progress arrow
+  if(fcConnecting && fcConnecting.endX !== undefined){
+    svgContent += '<line x1="'+fcConnecting.startX+'" y1="'+fcConnecting.startY+'" '+
+      'x2="'+fcConnecting.endX+'" y2="'+fcConnecting.endY+'" '+
+      'stroke="var(--am)" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>';
+  }
+  svg.innerHTML = svgContent;
+  svg.style.pointerEvents = 'all';
+
+  // Arrow click handlers — both visible and hit paths
+  svg.querySelectorAll('path[data-arrow], path[data-arrow-hit]').forEach(function(p){
+    var aid = p.dataset.arrow || p.dataset.arrowHit;
+    p.onclick = function(e){
+      e.stopPropagation();
+      fcSelectedArrow = fcSelectedArrow===aid ? null : aid;
+      // Show/hide delete button
+      var btn = document.getElementById('fc-arr-del');
+      if(fcSelectedArrow){
+        btn.style.display = 'block';
+        btn.style.left = (e.clientX+8)+'px';
+        btn.style.top = (e.clientY-16)+'px';
+        btn.onclick = function(){ fcDeleteArrow(fcSelectedArrow); fcSelectedArrow=null; btn.style.display='none'; renderFC(); };
+      } else {
+        btn.style.display = 'none';
+      }
+      renderFC();
+    };
+  });
+
+  // ── Nodes ──
+  fcNodes.forEach(function(n){
+    var existing = document.getElementById(n.id);
+    if(existing){
+      // Update position, size, selection
+      existing.style.left = n.x+'px';
+      existing.style.top = n.y+'px';
+      existing.style.width = (n.w||150)+'px';
+      existing.style.minHeight = (n.h||70)+'px';
+      existing.classList.toggle('selected', fcSelected===n.id);
+      var hasBlank = /\[Q\d+\]/i.test(n.text||'');
+      existing.style.borderColor = hasBlank?'var(--gr)':'var(--bl)';
+      existing.style.background = hasBlank?'var(--grl)':'#fff';
+    } else {
+      var el = document.createElement('div');
+      el.id = n.id;
+      var hasBlank = /\[Q\d+\]/i.test(n.text||'');
+      el.className = 'fc-node'+(fcSelected===n.id?' selected':'');
+      el.style.cssText = 'left:'+n.x+'px;top:'+n.y+'px;width:'+(n.w||150)+'px;'+
+        'min-height:'+(n.h||70)+'px;position:absolute;'+
+        'background:'+(hasBlank?'var(--grl)':'#fff')+';'+
+        'border-color:'+(hasBlank?'var(--gr)':'var(--bl)');
+
+      // Controls bar
+      var ctrl = document.createElement('div');
+      ctrl.className = 'fc-node-controls';
+      ctrl.innerHTML = '<button class="fc-node-btn" onclick="fcDeleteNode(\''+n.id+'\')">🗑 Delete box</button>';
+      el.appendChild(ctrl);
+
+      // Connection ports
+      ['t','r','b','l'].forEach(function(p){
+        var port = document.createElement('div');
+        port.className = 'fc-connect-port fc-port-'+p;
+        port.title = 'Drag to draw an arrow';
+        port.onmousedown = function(e){
+          e.stopPropagation();
+          fcStartConnect(n.id, p, e);
+        };
+        el.appendChild(port);
+      });
+
+      // Textarea
+      var ta = document.createElement('textarea');
+      ta.className = 'fc-node-text';
+      ta.placeholder = 'Box text... use [Q11] for blank, **word** for bold';
+      ta.rows = 3;
+      ta.value = n.text||'';
+      ta.style.cssText = 'width:100%;border:none;background:transparent;'+
+        'font-size:12px;font-family:inherit;outline:none;resize:none;'+
+        'line-height:1.5;cursor:text;min-height:48px';
+      ta.oninput = function(){
+        n.text = this.value;
+        var hb = /\[Q\d+\]/i.test(this.value);
+        el.style.borderColor = hb?'var(--gr)':'var(--bl)';
+        el.style.background = hb?'var(--grl)':'#fff';
+      };
+      ta.onblur = function(){
+        n.text = this.value;
+        updateFCAnswerFields();
+      };
+      el.appendChild(ta);
+
+      // Bold hint
+      var hint = document.createElement('div');
+      hint.className = 'fc-bold-hint';
+      hint.textContent = '**word** = bold · [Q11] = blank';
+      el.appendChild(hint);
+
+      // ── Resize handle ──
+      var rh = document.createElement('div');
+      rh.className = 'fc-resize-handle';
+      rh.title = 'Drag to resize';
+      var resizing = false, resStartX, resStartY, resStartW, resStartH;
+      rh.onmousedown = function(e){
+        e.stopPropagation();
+        resizing = true;
+        resStartX = e.clientX;
+        resStartY = e.clientY;
+        resStartW = n.w || 150;
+        resStartH = n.h || 70;
+        document.onmousemove = function(e2){
+          if(!resizing) return;
+          var dw = e2.clientX - resStartX;
+          var dh = e2.clientY - resStartY;
+          n.w = Math.max(100, resStartW + dw);
+          n.h = Math.max(50, resStartH + dh);
+          el.style.width = n.w+'px';
+          el.style.minHeight = n.h+'px';
+        };
+        document.onmouseup = function(){
+          if(resizing){ resizing=false; renderFC(); }
+        };
+      };
+      el.appendChild(rh);
+
+      // Drag to move box
+      el.onmousedown = function(e){
+        if(e.target.tagName==='TEXTAREA'||
+           e.target.tagName==='INPUT'||
+           e.target.classList.contains('fc-node-btn')||
+           e.target.classList.contains('fc-connect-port')||
+           e.target.classList.contains('fc-resize-handle')) return;
+        fcSelected = n.id;
+        fcSelectedArrow = null;
+        document.getElementById('fc-arr-del').style.display='none';
+        document.querySelectorAll('.fc-node').forEach(function(x){ x.classList.remove('selected'); });
+        el.classList.add('selected');
+        var rect = canvas.getBoundingClientRect();
+        fcDragging = n.id;
+        fcDragOffX = e.clientX - rect.left - n.x;
+        fcDragOffY = e.clientY - rect.top - n.y;
+        e.stopPropagation();
+      };
+
+      canvas.appendChild(el);
+    }
+  });
+
+  // Remove deleted nodes
+  canvas.querySelectorAll('.fc-node').forEach(function(el){
+    if(!fcNodes.find(function(n){ return n.id===el.id; }))
+      el.parentNode.removeChild(el);
+  });
+
+  // Canvas height
+  var maxY = 360;
+  fcNodes.forEach(function(n){ maxY = Math.max(maxY, n.y + (n.h||70) + 60); });
+  canvas.style.minHeight = maxY+'px';
+  svg.style.height = maxY+'px';
+
+  updateFCAnswerFields();
+};
+
+// Hide arrow delete button when clicking canvas
+document.addEventListener('click', function(e){
+  var btn = document.getElementById('fc-arr-del');
+  var canvas = document.getElementById('fc-canvas');
+  if(btn && canvas && !btn.contains(e.target)){
+    var svg = document.getElementById('fc-svg');
+    if(!e.target.closest || (!e.target.closest('[data-arrow]') && !e.target.closest('[data-arrow-hit]'))){
+      fcSelectedArrow = null;
+      btn.style.display = 'none';
+    }
+  }
+});
+
+// Override renderFCPreview to support bold
+renderFCPreview = function(g){
+  var nodes = g.fcNodes||[], arrows = g.fcArrows||[];
+  if(!nodes.length) return '<div style="color:var(--mu);font-size:13px">No flow-chart content.</div>';
+  var maxX=400, maxY=300;
+  nodes.forEach(function(n){ maxX=Math.max(maxX,n.x+(n.w||150)+40); maxY=Math.max(maxY,n.y+(n.h||70)+40); });
+  var h='<div style="position:relative;overflow:auto;background:#f8f8f6;border-radius:var(--r);border:1px solid var(--b);padding:10px">'+
+    '<div style="position:relative;width:'+maxX+'px;height:'+maxY+'px">';
+  // SVG arrows
+  h+='<svg style="position:absolute;inset:0;width:'+maxX+'px;height:'+maxY+'px;pointer-events:none">'+
+    '<defs><marker id="pv-arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'+
+    '<polygon points="0 0, 10 3.5, 0 7" fill="var(--bl)"/></marker></defs>';
+  arrows.forEach(function(a){
+    var from=nodes.find(function(n){return n.id===a.from;});
+    var to=nodes.find(function(n){return n.id===a.to;});
+    if(!from||!to) return;
+    var fw=from.w||150, fh=from.h||70, tw=to.w||150, th=to.h||70;
+    var fx=from.x+(a.fromPort==='r'?fw:a.fromPort==='l'?0:fw/2);
+    var fy=from.y+(a.fromPort==='b'?fh:a.fromPort==='t'?0:fh/2);
+    var tx=to.x+(a.toPort==='l'?0:a.toPort==='r'?tw:tw/2);
+    var ty2=to.y+(a.toPort==='t'?0:a.toPort==='b'?th:th/2);
+    var cx1=fx+(tx-fx)*0.5,cy1=fy,cx2=fx+(tx-fx)*0.5,cy2=ty2;
+    h+='<path d="M'+fx+','+fy+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+tx+','+ty2+'" stroke="var(--bl)" stroke-width="2" fill="none" marker-end="url(#pv-arr)"/>';
+  });
+  h+='</svg>';
+  // Nodes with bold + [Qn] inputs
+  nodes.forEach(function(n){
+    var hasBlank=/\[Q\d+\]/i.test(n.text||'');
+    var nw=n.w||150, nh=n.h||70;
+    h+='<div style="position:absolute;left:'+n.x+'px;top:'+n.y+'px;width:'+nw+'px;min-height:'+nh+'px;'+
+      'background:'+(hasBlank?'var(--grl)':'#fff')+';'+
+      'border:2px solid '+(hasBlank?'var(--gr)':'var(--bl)')+';'+
+      'border-radius:var(--r);padding:8px 10px;font-size:12px;'+
+      'box-shadow:0 2px 6px rgba(0,0,0,.08);line-height:1.8">';
+    // Apply bold then replace [Qn] with inputs
+    var cellHtml = renderBold(n.text||'').replace(/\[Q(\d+)\]/gi,function(m,qn){
+      var num=parseInt(qn);
+      return '<span style="font-size:10px;font-weight:700;color:var(--bl);margin-right:2px">'+num+'</span>'+
+        '<input class="prev-fb" type="text" placeholder="..." '+
+        'oninput="prevAnswers['+num+']=this.value" '+
+        'style="min-width:80px;max-width:140px">';
+    });
+    cellHtml = cellHtml.replace(/\n/g,'<br>');
+    h += cellHtml+'</div>';
+  });
+  h+='</div></div>';
+  return h;
+};
+
+console.log('JIC IELTS — flowchart resize, arrow delete, bold loaded ✓');
+</script>
