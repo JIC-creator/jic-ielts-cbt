@@ -7717,3 +7717,159 @@ rendQGCard = function(g, gi, mod, sp){
 
 console.log('JIC IELTS — MCQ multiple numbering fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Edit MCQ multiple question stem + options
+// ═══════════════════════════════════════════════
+
+// Override rendQGCard for mcq2/mcq2r to add Edit stem button
+var _prevRendQGCard3 = rendQGCard;
+rendQGCard = function(g, gi, mod, sp){
+  if(g.type!=='mcq2' && g.type!=='mcq2r'){
+    return _prevRendQGCard3(g, gi, mod, sp);
+  }
+  var choose = g.chooseN||2;
+  var numOpts = g.numOptions||5;
+  var lastLetter = LETTERS[numOpts-1]||'E';
+  var chooseWord = NUM_WORDS[choose]||choose;
+  var tl = 'Multiple Choice (choose '+chooseWord+')';
+
+  var h = '<div class="qb" id="qg-card-'+gi+'" draggable="true" '+
+    'ondragstart="qgDragStart(event,'+gi+',\''+mod+'\','+sp+')" '+
+    'ondragover="qgDragOver(event,'+gi+')" '+
+    'ondragleave="qgDragLeave(event,'+gi+')" '+
+    'ondrop="qgDrop(event,'+gi+',\''+mod+'\','+sp+')">';
+
+  h += '<div class="qb-hdr" onclick="togQB(this)">'+
+    '<span class="qb-drag-handle" onclick="event.stopPropagation()">⠿</span>'+
+    '<div class="qb-num">'+(gi+1)+'</div>'+
+    '<div class="qb-title">Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+' · '+tl+'</div>'+
+    '<span class="qtb">Choose '+chooseWord+' from A–'+lastLetter+'</span>'+
+    '<div style="margin-left:auto;display:flex;gap:4px;align-items:center">'+
+    '<div class="qb-reorder-btns" onclick="event.stopPropagation()">'+
+    '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',-1)">▲</button>'+
+    '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',1)">▼</button>'+
+    '</div>'+
+    '<button class="btn btn-sm" onclick="event.stopPropagation();openEditQG(\''+mod+'\','+sp+','+gi+')">✏️ Edit group</button>'+
+    '<button class="btn btn-sm btn-d" onclick="event.stopPropagation();rmQG(\''+mod+'\','+sp+','+gi+')">🗑</button>'+
+    '</div></div>';
+
+  h += '<div class="qb-body">';
+  h += '<div style="font-size:12px;color:var(--mu);margin-bottom:8px">'+
+    renderBold(g.instruction||'')+'</div>';
+  h += '<div style="background:var(--bll);border-radius:var(--r);padding:8px 12px;font-size:13px;margin-bottom:10px">'+
+    '<strong>Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+'</strong> · Students choose '+
+    '<strong>'+chooseWord+'</strong> letters, A–'+lastLetter+
+    ' · Each answer fills one question slot</div>';
+
+  if(g.questions && g.questions.length){
+    var stemQ = g.questions[0];
+    // Show stem + edit button
+    h += '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:10px">';
+    if(stemQ.text){
+      h += '<div style="font-size:13px;flex:1">'+renderBold(stemQ.text)+'</div>';
+    } else {
+      h += '<div style="font-size:13px;color:var(--mu);flex:1;font-style:italic">No question stem</div>';
+    }
+    h += '<button class="btn btn-sm" onclick="openEditMCQM(\''+mod+'\','+sp+','+gi+')" style="flex-shrink:0">✏️ Edit stem & options</button>';
+    h += '</div>';
+    // Show options
+    if(stemQ.options && Object.keys(stemQ.options).length){
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px">';
+      Object.keys(stemQ.options).sort().forEach(function(l){
+        h += '<div style="font-size:12px;padding:5px 8px;background:var(--bg);border-radius:4px;border:1px solid var(--b)">'+
+          '<strong>'+l+'.</strong> '+renderBold(stemQ.options[l])+'</div>';
+      });
+      h += '</div>';
+    }
+    // Show answer key
+    h += '<div style="font-size:12px;color:var(--mu)">Answer key: '+
+      g.questions.map(function(q){
+        return '<span class="tag">Q'+q.num+': <span style="color:var(--gr);font-weight:600">'+(q.answer||'?')+'</span></span>';
+      }).join('')+'</div>';
+  } else {
+    h += '<button class="btn btn-p btn-sm" onclick="openQ(\''+mod+'\','+sp+','+gi+')">+ Add question stem & options</button>';
+  }
+
+  h += '</div></div>';
+  return h;
+};
+
+// Open edit modal for MCQ multiple stem + options
+function openEditMCQM(mod, sp, gi){
+  qCtx = {mod:mod, sp:sp, gi:gi};
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  var choose = g.chooseN||2;
+  var numOpts = g.numOptions||5;
+  var lastLetter = LETTERS[numOpts-1]||'E';
+  var chooseWord = NUM_WORDS[choose]||choose;
+  var stemQ = g.questions&&g.questions[0]||{text:'',options:{},answer:''};
+  // Current correct answers
+  var curAnswers = g.questions ?
+    g.questions.map(function(q){ return q.answer||''; }).join(',') : '';
+
+  document.getElementById('q-title').textContent =
+    'Edit Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+' — Choose '+chooseWord;
+
+  var h = '<input type="hidden" id="qn" value="'+g.fromQ+'">';
+  h += '<div style="background:var(--bll);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:13px;color:#0C447C">'+
+    'Editing Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+' · Choose <strong>'+chooseWord+'</strong> letters, A–'+lastLetter+'</div>';
+  h += '<div class="fr"><label class="fl">Question stem (optional)</label>'+
+    '<textarea class="inp" id="qt" rows="2" placeholder="e.g. Which TWO of the following are mentioned...">'+( stemQ.text||'')+'</textarea></div>';
+  h += '<div style="font-size:12px;font-weight:600;color:var(--mu);margin-bottom:10px">Options</div>';
+  for(var i=0; i<numOpts; i++){
+    var l = LETTERS[i];
+    var optVal = (stemQ.options&&stemQ.options[l])||'';
+    h += '<div class="fr"><label class="fl">Option '+l+'</label>'+
+      '<input class="inp" id="qo'+l+'" value="'+optVal+'" placeholder="Option '+l+'..."></div>';
+  }
+  h += '<div class="fr"><label class="fl">Correct answers (comma separated, e.g. A,C)</label>'+
+    '<input class="inp" id="qa" value="'+curAnswers+'" placeholder="e.g. A,C"></div>';
+
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = saveEditMCQM;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Update question';
+  openM('q');
+}
+
+function saveEditMCQM(){
+  var tc = getTC();
+  var g = qCtx.mod==='listening' ?
+    tc.listening.sections[qCtx.sp].groups[qCtx.gi] :
+    tc.reading.passages[qCtx.sp].groups[qCtx.gi];
+  var text = (document.getElementById('qt')||{}).value||'';
+  var ans = (document.getElementById('qa')||{}).value||'';
+  var opts = {};
+  'ABCDEFGH'.split('').forEach(function(l){
+    var el = document.getElementById('qo'+l);
+    if(el && el.value) opts[l] = el.value;
+  });
+  var answerList = ans.split(',').map(function(a){ return a.trim().toUpperCase(); });
+  // Rebuild questions array
+  g.questions = [];
+  for(var qi = g.fromQ; qi <= g.toQ; qi++){
+    var slotIdx = qi - g.fromQ;
+    g.questions.push({
+      num:qi,
+      text: qi===g.fromQ ? text : '',
+      options: qi===g.fromQ ? opts : {},
+      answer: answerList[slotIdx]||'',
+      type: g.type,
+      isPartOfGroup: true,
+      groupFromQ: g.fromQ,
+      groupToQ: g.toQ
+    });
+  }
+  // Reset modal button
+  document.querySelector('#mo-q .mf .btn-p').onclick = saveQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Save question';
+  closeM('q');
+  showToast('Question updated!');
+  renderMod(curTOwner==='admin'?'a':'t', qCtx.mod);
+}
+
+console.log('JIC IELTS — MCQ multiple edit fix loaded ✓');
+</script>
