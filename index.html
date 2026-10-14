@@ -8506,3 +8506,378 @@ loadTeacher = function(d){
 
 console.log('JIC IELTS — Assignment system loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  TEACHER-TO-TEACHER SHARING + ADMIN PROMOTION
+// ═══════════════════════════════════════════════
+
+// ── CSS ──
+var shareCSS = document.createElement('style');
+shareCSS.textContent = `
+.share-teacher-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--b);
+  cursor: pointer;
+  transition: background .1s;
+}
+.share-teacher-row:hover { background: var(--bg); }
+.share-teacher-row.selected { background: var(--bll); }
+.share-teacher-row input { accent-color: var(--bl); width: 16px; height: 16px; flex-shrink: 0; }
+.shared-from-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: var(--purplel);
+  color: var(--purple);
+  font-weight: 600;
+}
+.promoted-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: var(--orangel);
+  color: var(--orange);
+  font-weight: 600;
+}
+`;
+document.head.appendChild(shareCSS);
+
+// ── Share modal ──
+var shareModal = document.createElement('div');
+shareModal.className = 'mo';
+shareModal.id = 'mo-share';
+shareModal.innerHTML =
+  '<div class="mb" style="max-width:500px">'+
+  '<div class="mh"><div class="mt" id="share-title">Share test with teachers</div>'+
+  '<button class="btn btn-sm" onclick="closeM(\'share\')">✕</button></div>'+
+  '<div class="mbd">'+
+  '<div style="font-size:13px;color:var(--mu);margin-bottom:12px">'+
+  'Select teachers to share this test with. They can assign it to their students or make their own editable copy.</div>'+
+  '<input class="inp" id="share-search" placeholder="Search teachers..." oninput="filtShareTeachers()" style="margin-bottom:8px">'+
+  '<div id="share-teacher-list" style="border:1px solid var(--b);border-radius:var(--r);max-height:300px;overflow-y:auto">'+
+  '<div style="padding:12px;color:var(--mu);font-size:13px">Loading teachers...</div>'+
+  '</div></div>'+
+  '<div class="mf">'+
+  '<button class="btn" onclick="closeM(\'share\')">Cancel</button>'+
+  '<button class="btn btn-p" onclick="saveShare()">Share test</button>'+
+  '</div></div>';
+shareModal.onclick = function(e){ if(e.target===shareModal) closeM('share'); };
+document.body.appendChild(shareModal);
+
+var shareTestId = null, shareTestName = '';
+var allTeachersForShare = [], selectedTeacherIds = new Set();
+var currentSharedWith = [];
+
+function openShareModal(testId, testName){
+  shareTestId = testId;
+  shareTestName = testName;
+  selectedTeacherIds = new Set();
+  document.getElementById('share-title').textContent = 'Share: '+testName;
+  // Load existing shares
+  db.collection('test_shares').where('testId','==',testId).get().then(function(snap){
+    currentSharedWith = [];
+    snap.forEach(function(d){ currentSharedWith.push(d.data().sharedWithId); });
+    currentSharedWith.forEach(function(id){ selectedTeacherIds.add(id); });
+    loadTeachersForShare();
+  }).catch(function(){ loadTeachersForShare(); });
+  openM('share');
+}
+
+function loadTeachersForShare(){
+  db.collection('users').where('role','==','teacher').get().then(function(snap){
+    allTeachersForShare = [];
+    snap.forEach(function(d){
+      if(d.id !== CU.uid) // exclude self
+        allTeachersForShare.push(Object.assign({id:d.id}, d.data()));
+    });
+    rendShareTeachers(allTeachersForShare);
+  });
+}
+
+function rendShareTeachers(list){
+  var el = document.getElementById('share-teacher-list');
+  if(!list.length){
+    el.innerHTML='<div style="padding:12px;color:var(--mu);font-size:13px">No other teachers registered yet.</div>';
+    return;
+  }
+  el.innerHTML = list.map(function(t){
+    var ini = (t.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    var isSel = selectedTeacherIds.has(t.id);
+    var wasShared = currentSharedWith.includes(t.id);
+    return '<div class="share-teacher-row'+(isSel?' selected':'')+'" id="trow-'+t.id+'" onclick="togTeacherShare(\''+t.id+'\')">'+
+      '<input type="checkbox" '+(isSel?'checked':'')+' onclick="event.stopPropagation();togTeacherShare(\''+t.id+'\')">'+
+      '<div class="student-avatar">'+ini+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:13px;font-weight:500">'+t.name+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+t.email+'</div>'+
+      '</div>'+
+      (wasShared?'<span class="shared-from-badge">Already shared</span>':'')+
+      '</div>';
+  }).join('');
+}
+
+function togTeacherShare(id){
+  if(selectedTeacherIds.has(id)) selectedTeacherIds.delete(id);
+  else selectedTeacherIds.add(id);
+  var row = document.getElementById('trow-'+id);
+  var cb = row && row.querySelector('input[type=checkbox]');
+  if(row) row.classList.toggle('selected', selectedTeacherIds.has(id));
+  if(cb) cb.checked = selectedTeacherIds.has(id);
+}
+
+function filtShareTeachers(){
+  var q = document.getElementById('share-search').value.toLowerCase();
+  rendShareTeachers(allTeachersForShare.filter(function(t){
+    return (t.name+t.email).toLowerCase().includes(q);
+  }));
+}
+
+function saveShare(){
+  if(!shareTestId){ showToast('No test selected.','err'); return; }
+  var toAdd = Array.from(selectedTeacherIds).filter(function(id){ return !currentSharedWith.includes(id); });
+  var toRemove = currentSharedWith.filter(function(id){ return !selectedTeacherIds.has(id); });
+  var batch = db.batch();
+  // Add new shares
+  toAdd.forEach(function(teacherId){
+    var ref = db.collection('test_shares').doc(shareTestId+'_'+teacherId);
+    batch.set(ref, {
+      testId: shareTestId,
+      testName: shareTestName,
+      ownerId: CU.uid,
+      ownerName: document.getElementById('t-name').textContent,
+      sharedWithId: teacherId,
+      sharedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Send notification
+    db.collection('notifications').add({
+      teacherId: teacherId,
+      type: 'test_shared',
+      fromName: document.getElementById('t-name').textContent,
+      testId: shareTestId,
+      testName: shareTestName,
+      message: document.getElementById('t-name').textContent+' shared a test with you: '+shareTestName,
+      read: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  });
+  // Remove revoked shares
+  toRemove.forEach(function(teacherId){
+    var ref = db.collection('test_shares').doc(shareTestId+'_'+teacherId);
+    batch.delete(ref);
+  });
+  batch.commit().then(function(){
+    closeM('share');
+    showToast('Test shared with '+selectedTeacherIds.size+' teacher(s)!');
+    loadMyTests();
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── Load shared-with-me tests for teacher ──
+var _prevLoadSharedForT2 = loadSharedForT;
+loadSharedForT = function(){
+  var el = document.getElementById('t-shared');
+  if(!el) return;
+  var tests = [];
+  var done = 0;
+  function tryRender(){ done++; if(done===2) rendSharedForTeacher(tests); }
+  // Admin shared tests
+  db.collection('tests').where('owner','==','admin').where('visibility','==','shared').get().then(function(snap){
+    snap.forEach(function(d){ tests.push(Object.assign({id:d.id,shareType:'admin'},d.data())); });
+    tryRender();
+  }).catch(tryRender);
+  // Teacher-to-teacher shared tests
+  db.collection('test_shares').where('sharedWithId','==',CU.uid).get().then(function(snap){
+    var pending = snap.size;
+    if(!pending){ tryRender(); return; }
+    snap.forEach(function(d){
+      var share = d.data();
+      db.collection('tests').doc(share.testId).get().then(function(td){
+        if(td.exists){
+          var t = Object.assign({id:td.id, shareType:'teacher', sharedBy:share.ownerName}, td.data());
+          tests.push(t);
+        }
+        pending--;
+        if(!pending) tryRender();
+      }).catch(function(){ pending--; if(!pending) tryRender(); });
+    });
+  }).catch(tryRender);
+};
+
+function rendSharedForTeacher(tests){
+  var el = document.getElementById('t-shared');
+  if(!tests.length){
+    el.innerHTML='<div style="color:var(--mu);font-size:13px">No shared tests available yet.</div>';
+    return;
+  }
+  el.innerHTML = tests.map(function(t){
+    var badge = t.shareType==='admin'?
+      '<span class="badge b-gr">Shared by Admin</span>':
+      '<span class="shared-from-badge">👤 From: '+t.sharedBy+'</span>';
+    return '<div class="tc">'+
+      '<div class="ti" style="background:'+(t.shareType==='admin'?'var(--grl)':'var(--purplel)')+'">'+
+        (t.shareType==='admin'?'🌐':'👤')+
+      '</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:14px;font-weight:600;margin-bottom:3px">'+t.name+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+t.type+'</div>'+
+      '</div>'+
+      badge+
+      '<button class="btn btn-sm btn-p" style="margin-left:8px" onclick="duplicateTest(\''+t.id+'\',\''+t.name.replace(/'/g,"\\'")+'\')" title="Make your own editable copy">📋 Duplicate</button>'+
+      '</div>';
+  }).join('');
+}
+
+// ── Duplicate test ──
+function duplicateTest(testId, testName){
+  if(!confirm('Make your own editable copy of "'+testName+'"?')) return;
+  showToast('Duplicating...');
+  // Copy test document
+  db.collection('tests').doc(testId).get().then(function(d){
+    var orig = d.data();
+    var newTest = Object.assign({}, orig, {
+      name: testName+' (Copy)',
+      owner: 'teacher',
+      createdBy: CU.uid,
+      teacherId: CU.uid,
+      status: 'draft',
+      duplicatedFrom: testId,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    delete newTest.visibility;
+    return db.collection('tests').add(newTest);
+  }).then(function(ref){
+    // Copy content
+    return db.collection('tests').doc(testId).collection('content').doc('data').get().then(function(c){
+      if(c.exists){
+        return db.collection('tests').doc(ref.id).collection('content').doc('data').set(c.data());
+      }
+    }).then(function(){ return ref.id; });
+  }).then(function(newId){
+    showToast('Test duplicated! Find it in My Test Library.');
+    loadMyTests();
+    tN('mytests', document.querySelectorAll('#s-teacher .ni')[1]);
+  }).catch(function(e){ showToast('Error duplicating: '+e.message,'err'); });
+}
+
+// ── Add Share button to teacher test cards ──
+var _prevLoadMyTests4 = loadMyTests;
+loadMyTests = function(){
+  db.collection('tests').where('createdBy','==',CU.uid).where('owner','==','teacher').get().then(function(snap){
+    var h='';
+    snap.forEach(function(d){
+      var t=d.data();
+      var isActive=t.status==='active';
+      h+='<div class="tc" onclick="openEdit(\''+d.id+'\',\'teacher\')">'+
+        '<div class="ti" style="background:var(--bll)">📋</div>'+
+        '<div style="flex:1">'+
+          '<div style="font-size:14px;font-weight:600;margin-bottom:3px">'+t.name+
+            (t.duplicatedFrom?'<span class="badge b-gy" style="margin-left:6px;font-size:10px">Copy</span>':'')+
+          '</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+t.type+' · '+t.status+'</div>'+
+        '</div>'+
+        '<span class="cm-tag" onclick="event.stopPropagation();openClassroom(\''+d.id+'\')">🏫 Classroom</span>'+
+        '<button class="btn btn-sm" style="margin-left:6px;background:var(--purplel);color:var(--purple);border-color:var(--purple)" onclick="event.stopPropagation();openShareModal(\''+d.id+'\',\''+t.name.replace(/'/g,"\\'")+'\')">🔗 Share</button>'+
+        '<button class="btn btn-sm" style="margin-left:6px;background:var(--purplel);color:var(--purple);border-color:var(--purple)" onclick="event.stopPropagation();openAssignModal(\''+d.id+'\',\''+t.name.replace(/'/g,"\\'")+'\')">👥 Assign</button>'+
+        '<button class="btn btn-sm" style="margin-left:6px;background:'+(isActive?'var(--grl)':'var(--bg)')+';color:'+(isActive?'var(--gr)':'var(--mu)')+';border-color:'+(isActive?'var(--gr)':'var(--bm)')+'" onclick="toggleStatus(\''+d.id+'\',\''+t.status+'\',event)">'+(isActive?'✓ Active':'○ Draft')+'</button>'+
+        '<button class="btn btn-sm btn-d" style="margin-left:4px" onclick="event.stopPropagation();delTest(\''+d.id+'\')">🗑</button>'+
+        '</div>';
+    });
+    document.getElementById('my-tests').innerHTML=h||'<div style="color:var(--mu);font-size:13px">No tests yet.</div>';
+  });
+};
+
+// ── Admin — view all teacher tests + promote button ──
+// Add "All teacher tests" page to admin
+var aaTeacherTests = document.createElement('div');
+aaTeacherTests.className = 'ap mcn';
+aaTeacherTests.id = 'aa-teacher-tests';
+aaTeacherTests.innerHTML =
+  '<div style="font-size:18px;font-weight:600;margin-bottom:16px">All teacher tests</div>'+
+  '<div id="all-teacher-test-list"><div style="color:var(--mu);font-size:13px">Loading...</div></div>';
+var adminMain = document.getElementById('admin-main');
+if(adminMain) adminMain.appendChild(aaTeacherTests);
+
+// Add nav item for admin
+var adminSB = document.querySelector('#s-admin .sb div');
+if(adminSB){
+  var divider = adminSB.querySelector('.ss:nth-of-type(2)');
+  if(divider){
+    var newNav = document.createElement('div');
+    newNav.className = 'ni';
+    newNav.innerHTML = '📚 Teacher tests';
+    newNav.onclick = function(){ aN('teacher-tests',this); loadAllTeacherTests(); };
+    divider.parentNode.insertBefore(newNav, divider);
+  }
+}
+
+function loadAllTeacherTests(){
+  db.collection('tests').where('owner','==','teacher').get().then(function(snap){
+    var h='';
+    snap.forEach(function(d){
+      var t=d.data();
+      var isPromoted=t.promotedToShared;
+      h+='<div class="tc">'+
+        '<div class="ti" style="background:var(--bll)">📋</div>'+
+        '<div style="flex:1">'+
+          '<div style="font-size:14px;font-weight:600;margin-bottom:3px">'+t.name+'</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+t.type+' · by '+(t.teacherName||'Teacher')+' · '+t.status+'</div>'+
+        '</div>'+
+        (isPromoted?'<span class="promoted-badge">⭐ Promoted</span>':'')+
+        '<button class="btn btn-sm '+(isPromoted?'btn-d':'btn-p')+'" style="margin-left:8px" '+
+          'onclick="promoteTest(\''+d.id+'\','+(isPromoted?'false':'true')+')">' +
+          (isPromoted?'↩ Demote':'⭐ Promote to shared')+'</button>'+
+        '</div>';
+    });
+    document.getElementById('all-teacher-test-list').innerHTML=h||
+      '<div style="color:var(--mu);font-size:13px">No teacher tests yet.</div>';
+  });
+}
+
+function promoteTest(testId, promote){
+  var msg = promote?'Promote this test to the shared library? All teachers and students will see it.':
+    'Remove this test from the shared library?';
+  if(!confirm(msg)) return;
+  db.collection('tests').doc(testId).update({
+    promotedToShared: promote,
+    owner: promote?'admin':'teacher',
+    visibility: promote?'shared':null
+  }).then(function(){
+    showToast(promote?'Test promoted to shared library!':'Test removed from shared library.');
+    loadAllTeacherTests();
+    loadShared();
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── Update notifications to handle share type ──
+var _prevRendNotifications = rendNotifications;
+rendNotifications = function(){
+  var el = document.getElementById('t-notif-list');
+  if(!notifications.length){ el.innerHTML='<div class="notif-empty">No notifications yet.</div>'; return; }
+  el.innerHTML = notifications.map(function(n){
+    var time = n.createdAt?new Date(n.createdAt.toDate()).toLocaleString():'';
+    var icon = n.type==='test_shared'?'🔗':'✅';
+    var detail = n.type==='test_shared'?
+      '<strong>'+n.fromName+'</strong> shared a test with you: '+n.testName:
+      n.studentName+' completed <strong>'+n.module+'</strong> · '+n.testName;
+    return '<div class="notif-item'+(n.read?'':' unread')+'" onclick="markRead(\''+n.id+'\')">'+
+      '<div style="display:flex;align-items:center;gap:8px">'+
+        '<span style="font-size:18px">'+icon+'</span>'+
+        '<div>'+
+          '<div class="ni-detail">'+detail+'</div>'+
+          '<div class="ni-time">'+time+'</div>'+
+        '</div>'+
+      '</div></div>';
+  }).join('');
+};
+
+console.log('JIC IELTS — Teacher sharing + admin promotion loaded ✓');
+</script>
