@@ -7873,3 +7873,636 @@ function saveEditMCQM(){
 
 console.log('JIC IELTS — MCQ multiple edit fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  ASSIGNMENT SYSTEM
+//  - Assign tests to specific students
+//  - Skill practice vs Full test mode
+//  - Module locking
+//  - Due dates
+//  - Bell notifications
+// ═══════════════════════════════════════════════
+
+// ── CSS ──
+var assignCSS = document.createElement('style');
+assignCSS.textContent = `
+/* Bell notification */
+.notif-bell {
+  position: relative;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-size: 20px;
+  padding: 4px 8px;
+  border-radius: var(--r);
+  color: var(--mu);
+  transition: background .15s;
+}
+.notif-bell:hover { background: var(--bg); }
+.notif-badge {
+  position: absolute;
+  top: 0; right: 0;
+  background: var(--rd);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+.notif-dropdown {
+  position: fixed;
+  top: 53px;
+  right: 16px;
+  width: 340px;
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  z-index: 500;
+  display: none;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.notif-dropdown.open { display: block; }
+.notif-hdr {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--s);
+}
+.notif-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--b);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .1s;
+}
+.notif-item:hover { background: var(--bg); }
+.notif-item.unread { background: var(--bll); }
+.notif-item .ni-name { font-weight: 600; color: var(--t); }
+.notif-item .ni-detail { color: var(--mu); font-size: 12px; margin-top:2px; }
+.notif-item .ni-time { color: var(--hi); font-size: 11px; margin-top:2px; }
+.notif-empty { padding: 24px 16px; text-align: center; color: var(--mu); font-size: 13px; }
+
+/* Assignment modal */
+.assign-mode-btn {
+  flex: 1;
+  padding: 12px;
+  border: 2px solid var(--b);
+  border-radius: var(--r);
+  background: var(--s);
+  cursor: pointer;
+  text-align: center;
+  font-size: 13px;
+  font-family: inherit;
+  transition: all .15s;
+  color: var(--mu);
+}
+.assign-mode-btn:hover { border-color: var(--bl); color: var(--bl); }
+.assign-mode-btn.active { border-color: var(--bl); background: var(--bll); color: var(--bl); font-weight: 600; }
+.assign-mode-btn .ami { font-size: 22px; display: block; margin-bottom: 4px; }
+.assign-mode-btn .amd { font-size: 11px; color: var(--mu); margin-top: 3px; }
+.module-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--b);
+  border-radius: var(--r);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.module-toggle:hover { border-color: var(--bl); }
+.module-toggle.active { border-color: var(--bl); background: var(--bll); }
+.module-toggle input { accent-color: var(--bl); width: 16px; height: 16px; flex-shrink: 0; }
+.student-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--b);
+  cursor: pointer;
+  transition: background .1s;
+}
+.student-row:hover { background: var(--bg); }
+.student-row.selected { background: var(--bll); }
+.student-row input { accent-color: var(--bl); width: 16px; height: 16px; flex-shrink: 0; }
+.student-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--bll);
+  color: var(--bl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Student test card — locked modules */
+.module-card {
+  border: 1px solid var(--b);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  background: var(--s);
+  margin-bottom: 8px;
+}
+.module-card:hover:not(.locked) { border-color: var(--bl); }
+.module-card.locked { opacity: .5; cursor: not-allowed; background: var(--bg); }
+.module-card.completed { border-color: var(--gr); background: var(--grl); }
+.module-card .mc-icon { font-size: 22px; width: 40px; height: 40px; border-radius: var(--r); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.module-card .mc-status { margin-left: auto; font-size: 12px; }
+.due-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: var(--r); font-weight: 500; }
+.due-badge.ok { background: var(--grl); color: var(--gr); }
+.due-badge.soon { background: var(--aml); color: var(--am); }
+.due-badge.overdue { background: var(--rdl); color: var(--rd); }
+`;
+document.head.appendChild(assignCSS);
+
+// ── Add bell + notification dropdown to teacher topbar ──
+var tTopbar = document.querySelector('#s-teacher .topbar');
+if(tTopbar){
+  var bellWrap = document.createElement('div');
+  bellWrap.style.cssText = 'position:relative;display:flex;align-items:center';
+  bellWrap.innerHTML =
+    '<button class="notif-bell" id="t-bell" onclick="togNotifDropdown()" title="Notifications">🔔'+
+    '<span class="notif-badge" id="t-bell-badge" style="display:none">0</span></button>'+
+    '<div class="notif-dropdown" id="t-notif-dropdown">'+
+    '<div class="notif-hdr"><span>Notifications</span>'+
+    '<button class="btn btn-sm" onclick="markAllRead()">Mark all read</button></div>'+
+    '<div id="t-notif-list"><div class="notif-empty">No notifications yet.</div></div>'+
+    '</div>';
+  var signOutBtn = tTopbar.querySelector('.btn');
+  tTopbar.insertBefore(bellWrap, signOutBtn);
+}
+
+// Add assign button to test cards
+var _prevLoadMyTests3 = loadMyTests;
+loadMyTests = function(){
+  db.collection('tests').where('createdBy','==',CU.uid).where('owner','==','teacher').get().then(function(snap){
+    var h='';
+    snap.forEach(function(d){
+      var t=d.data();
+      var isActive=t.status==='active';
+      h+='<div class="tc" onclick="openEdit(\''+d.id+'\',\'teacher\')">'+
+        '<div class="ti" style="background:var(--bll)">📋</div>'+
+        '<div style="flex:1"><div style="font-size:14px;font-weight:600;margin-bottom:3px">'+t.name+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+t.type+' · '+t.status+'</div></div>'+
+        '<span class="cm-tag" onclick="event.stopPropagation();openClassroom(\''+d.id+'\')">🏫 Classroom</span>'+
+        '<button class="btn btn-sm" style="margin-left:6px;background:var(--purplel);color:var(--purple);border-color:var(--purple)" onclick="event.stopPropagation();openAssignModal(\''+d.id+'\',\''+t.name.replace(/'/g,"\\'")+'\')" >👥 Assign</button>'+
+        '<button class="btn btn-sm" style="margin-left:6px;background:'+(isActive?'var(--grl)':'var(--bg)')+';color:'+(isActive?'var(--gr)':'var(--mu)')+';border-color:'+(isActive?'var(--gr)':'var(--bm)')+'" onclick="toggleStatus(\''+d.id+'\',\''+t.status+'\',event)">'+(isActive?'✓ Active':'○ Draft')+'</button>'+
+        '<button class="btn btn-sm btn-d" style="margin-left:4px" onclick="event.stopPropagation();delTest(\''+d.id+'\')">🗑</button>'+
+        '</div>';
+    });
+    document.getElementById('my-tests').innerHTML=h||'<div style="color:var(--mu);font-size:13px">No tests yet.</div>';
+  });
+};
+
+// ── Assignment modal ──
+var assignModal = document.createElement('div');
+assignModal.className = 'mo';
+assignModal.id = 'mo-assign';
+assignModal.innerHTML =
+  '<div class="mb" style="max-width:600px">'+
+  '<div class="mh"><div class="mt" id="assign-title">Assign test</div>'+
+  '<button class="btn btn-sm" onclick="closeM(\'assign\')">✕</button></div>'+
+  '<div class="mbd">'+
+  // Mode selector
+  '<label class="fl">Assignment mode</label>'+
+  '<div style="display:flex;gap:8px;margin-bottom:16px">'+
+  '<button class="assign-mode-btn active" id="mode-skill" onclick="selAssignMode(\'skill\',this)">'+
+  '<span class="ami">🎯</span>Skill practice<div class="amd">Unlock specific modules only</div></button>'+
+  '<button class="assign-mode-btn" id="mode-full" onclick="selAssignMode(\'full\',this)">'+
+  '<span class="ami">📋</span>Full test<div class="amd">All modules, must complete in order</div></button>'+
+  '</div>'+
+  // Skill practice — module selection
+  '<div id="assign-modules">'+
+  '<label class="fl">Modules to unlock</label>'+
+  '<div class="module-toggle active" id="mt-listening" onclick="togModule(\'listening\')">'+
+  '<input type="checkbox" id="mc-listening" checked onclick="event.stopPropagation();togModule(\'listening\')">'+
+  '<span style="font-size:18px">🎧</span><span style="font-size:13px;font-weight:500">Listening</span></div>'+
+  '<div class="module-toggle" id="mt-reading" onclick="togModule(\'reading\')">'+
+  '<input type="checkbox" id="mc-reading" onclick="event.stopPropagation();togModule(\'reading\')">'+
+  '<span style="font-size:18px">📖</span><span style="font-size:13px;font-weight:500">Reading</span></div>'+
+  '<div class="module-toggle" id="mt-writing" onclick="togModule(\'writing\')">'+
+  '<input type="checkbox" id="mc-writing" onclick="event.stopPropagation();togModule(\'writing\')">'+
+  '<span style="font-size:18px">✏️</span><span style="font-size:13px;font-weight:500">Writing</span></div>'+
+  '</div>'+
+  // Full test info
+  '<div id="assign-full-info" style="display:none;background:var(--bll);border-radius:var(--r);padding:10px 12px;font-size:13px;color:#0C447C;margin-bottom:14px">'+
+  '📋 Students must complete modules in order: <strong>Listening → Reading → Writing</strong>'+
+  '</div>'+
+  // Due date
+  '<div class="fr" style="margin-top:12px"><label class="fl">Due date</label>'+
+  '<input class="inp" type="date" id="assign-due" style="width:200px"></div>'+
+  // Student list
+  '<label class="fl">Select students</label>'+
+  '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+  '<button class="btn btn-sm btn-p" onclick="selAllStudents(true)">Select all</button>'+
+  '<button class="btn btn-sm" onclick="selAllStudents(false)">Deselect all</button>'+
+  '<input class="inp" id="assign-search" placeholder="Search students..." oninput="filtAssignStudents()" style="flex:1">'+
+  '</div>'+
+  '<div id="assign-student-list" style="border:1px solid var(--b);border-radius:var(--r);max-height:250px;overflow-y:auto">'+
+  '<div style="padding:12px;color:var(--mu);font-size:13px">Loading students...</div>'+
+  '</div>'+
+  '</div>'+
+  '<div class="mf">'+
+  '<button class="btn" onclick="closeM(\'assign\')">Cancel</button>'+
+  '<button class="btn btn-p" onclick="saveAssignment()">💾 Save assignment</button>'+
+  '</div></div>';
+assignModal.onclick = function(e){ if(e.target===assignModal) closeM('assign'); };
+document.body.appendChild(assignModal);
+
+var assignTestId = null, assignTestName = '', assignMode = 'skill';
+var assignModules = { listening:true, reading:false, writing:false };
+var selectedStudentIds = new Set();
+var allStudentsForAssign = [];
+
+function openAssignModal(testId, testName){
+  assignTestId = testId;
+  assignTestName = testName;
+  assignMode = 'skill';
+  assignModules = { listening:true, reading:false, writing:false };
+  selectedStudentIds = new Set();
+  document.getElementById('assign-title').textContent = 'Assign: '+testName;
+  // Reset UI
+  selAssignMode('skill', document.getElementById('mode-skill'));
+  ['listening','reading','writing'].forEach(function(m){
+    var cb = document.getElementById('mc-'+m);
+    var tog = document.getElementById('mt-'+m);
+    if(cb){ cb.checked = m==='listening'; }
+    if(tog){ tog.classList.toggle('active', m==='listening'); }
+  });
+  // Set default due date to 1 week from now
+  var due = new Date(); due.setDate(due.getDate()+7);
+  document.getElementById('assign-due').value = due.toISOString().split('T')[0];
+  // Load existing assignment
+  db.collection('assignments').where('testId','==',testId).where('teacherId','==',CU.uid).get().then(function(snap){
+    if(!snap.empty){
+      var existing = snap.docs[0].data();
+      if(existing.modules) assignModules = existing.modules;
+      if(existing.mode){ assignMode = existing.mode; selAssignMode(existing.mode, document.getElementById('mode-'+existing.mode)); }
+      if(existing.dueDate) document.getElementById('assign-due').value = existing.dueDate;
+      if(existing.studentIds) existing.studentIds.forEach(function(id){ selectedStudentIds.add(id); });
+      // Update module UI
+      ['listening','reading','writing'].forEach(function(m){
+        var cb = document.getElementById('mc-'+m);
+        var tog = document.getElementById('mt-'+m);
+        if(cb) cb.checked = assignModules[m];
+        if(tog) tog.classList.toggle('active', assignModules[m]);
+      });
+    }
+    loadAssignStudents();
+  }).catch(function(){ loadAssignStudents(); });
+  openM('assign');
+}
+
+function selAssignMode(mode, el){
+  assignMode = mode;
+  document.querySelectorAll('.assign-mode-btn').forEach(function(b){ b.classList.remove('active'); });
+  if(el) el.classList.add('active');
+  document.getElementById('assign-modules').style.display = mode==='skill'?'block':'none';
+  document.getElementById('assign-full-info').style.display = mode==='full'?'block':'none';
+  if(mode==='full'){
+    assignModules = {listening:true, reading:true, writing:true};
+  }
+}
+
+function togModule(mod){
+  assignModules[mod] = !assignModules[mod];
+  var cb = document.getElementById('mc-'+mod);
+  var tog = document.getElementById('mt-'+mod);
+  if(cb) cb.checked = assignModules[mod];
+  if(tog) tog.classList.toggle('active', assignModules[mod]);
+}
+
+function loadAssignStudents(){
+  db.collection('users').where('role','==','student').get().then(function(snap){
+    allStudentsForAssign = [];
+    snap.forEach(function(d){ allStudentsForAssign.push(Object.assign({id:d.id},d.data())); });
+    rendAssignStudents(allStudentsForAssign);
+  });
+}
+
+function rendAssignStudents(list){
+  var el = document.getElementById('assign-student-list');
+  if(!list.length){ el.innerHTML='<div style="padding:12px;color:var(--mu);font-size:13px">No students registered yet.</div>'; return; }
+  el.innerHTML = list.map(function(s){
+    var ini = (s.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    var isSel = selectedStudentIds.has(s.id);
+    return '<div class="student-row'+(isSel?' selected':'')+'" id="srow-'+s.id+'" onclick="togStudentSel(\''+s.id+'\')">'+
+      '<input type="checkbox" '+(isSel?'checked':'')+' onclick="event.stopPropagation();togStudentSel(\''+s.id+'\')">'+
+      '<div class="student-avatar">'+ini+'</div>'+
+      '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+s.name+'</div>'+
+      '<div style="font-size:12px;color:var(--mu)">'+s.email+'</div></div>'+
+      '</div>';
+  }).join('');
+}
+
+function togStudentSel(id){
+  if(selectedStudentIds.has(id)) selectedStudentIds.delete(id);
+  else selectedStudentIds.add(id);
+  var row = document.getElementById('srow-'+id);
+  var cb = row&&row.querySelector('input[type=checkbox]');
+  if(row) row.classList.toggle('selected', selectedStudentIds.has(id));
+  if(cb) cb.checked = selectedStudentIds.has(id);
+}
+
+function selAllStudents(sel){
+  allStudentsForAssign.forEach(function(s){
+    if(sel) selectedStudentIds.add(s.id);
+    else selectedStudentIds.delete(s.id);
+  });
+  rendAssignStudents(allStudentsForAssign);
+}
+
+function filtAssignStudents(){
+  var q = document.getElementById('assign-search').value.toLowerCase();
+  rendAssignStudents(allStudentsForAssign.filter(function(s){
+    return (s.name+s.email).toLowerCase().includes(q);
+  }));
+}
+
+function saveAssignment(){
+  if(!assignTestId){ showToast('No test selected.','err'); return; }
+  if(!selectedStudentIds.size){ showToast('Please select at least one student.','err'); return; }
+  var dueDate = document.getElementById('assign-due').value;
+  var data = {
+    testId: assignTestId,
+    testName: assignTestName,
+    teacherId: CU.uid,
+    teacherName: document.getElementById('t-name').textContent,
+    studentIds: Array.from(selectedStudentIds),
+    modules: assignMode==='full' ? {listening:true,reading:true,writing:true} : assignModules,
+    mode: assignMode,
+    dueDate: dueDate,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  // Save to assignments collection
+  db.collection('assignments').where('testId','==',assignTestId).where('teacherId','==',CU.uid).get().then(function(snap){
+    var pr;
+    if(!snap.empty) pr = db.collection('assignments').doc(snap.docs[0].id).update(data);
+    else pr = db.collection('assignments').add(data);
+    return pr;
+  }).then(function(){
+    closeM('assign');
+    showToast('Assignment saved! '+selectedStudentIds.size+' student(s) assigned.');
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── Student side — show only assigned tests ──
+loadStudentTests = function(){
+  if(!CU) return;
+  // Find assignments for this student
+  db.collection('assignments').where('studentIds','array-contains',CU.uid).get().then(function(snap){
+    var tests = [];
+    var done = 0;
+    if(snap.empty){ rendSTests([]); return; }
+    snap.forEach(function(d){
+      var asgn = d.data();
+      db.collection('tests').doc(asgn.testId).get().then(function(td){
+        if(td.exists){
+          var t = Object.assign({id:td.id}, td.data());
+          t.assignment = asgn;
+          tests.push(t);
+        }
+        done++;
+        if(done===snap.size) rendStudentAssignedTests(tests);
+      }).catch(function(){ done++; if(done===snap.size) rendStudentAssignedTests(tests); });
+    });
+  }).catch(function(e){ console.error(e); rendSTests([]); });
+};
+
+function rendStudentAssignedTests(tests){
+  var el = document.getElementById('s-tests');
+  if(!tests.length){
+    el.innerHTML='<div style="color:var(--mu);font-size:13px">No tests assigned to you yet.</div>';
+    return;
+  }
+  // Sort by due date
+  tests.sort(function(a,b){
+    var da=a.assignment&&a.assignment.dueDate||'9999';
+    var db2=b.assignment&&b.assignment.dueDate||'9999';
+    return da<db2?-1:1;
+  });
+  el.innerHTML = tests.map(function(t){
+    var asgn = t.assignment;
+    var modules = asgn.modules||{listening:true,reading:true,writing:true};
+    var dueStr = asgn.dueDate||'';
+    var dueBadge = '';
+    if(dueStr){
+      var due = new Date(dueStr); var now = new Date(); var diff = Math.ceil((due-now)/(1000*60*60*24));
+      if(diff<0) dueBadge='<span class="due-badge overdue">⚠️ Overdue</span>';
+      else if(diff<=3) dueBadge='<span class="due-badge soon">⏰ Due in '+diff+' day'+(diff===1?'':'s')+'</span>';
+      else dueBadge='<span class="due-badge ok">📅 Due '+due.toLocaleDateString()+'</span>';
+    }
+    var modeTag = asgn.mode==='full'?
+      '<span class="badge b-pu" style="margin-left:6px">Full test</span>':
+      '<span class="badge b-bl" style="margin-left:6px">Skill practice</span>';
+    return '<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="selAssignedTest(\''+t.id+'\')">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
+      '<div><div style="font-size:15px;font-weight:700">'+t.name+'</div>'+
+      '<div style="font-size:12px;color:var(--mu);margin-top:2px">'+t.type+modeTag+'</div></div>'+
+      dueBadge+'</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">'+
+      ['listening','reading','writing'].map(function(m){
+        var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+        var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+        var avail = modules[m];
+        return '<div style="text-align:center;padding:10px;border-radius:var(--r);border:1px solid var(--b);'+
+          'background:'+(avail?'var(--s)':'var(--bg)')+';opacity:'+(avail?1:.5)+'">' +
+          '<div style="font-size:20px;margin-bottom:4px">'+icons[m]+(avail?'':'🔒')+'</div>'+
+          '<div style="font-size:12px;font-weight:500;color:'+(avail?'var(--t)':'var(--mu)')+'">'+labels[m]+'</div>'+
+          '</div>';
+      }).join('')+
+      '</div></div>';
+  }).join('');
+}
+
+// Student selects assigned test
+var currentAssignment = null;
+function selAssignedTest(testId){
+  db.collection('assignments').where('testId','==',testId).where('studentIds','array-contains',CU.uid).get().then(function(snap){
+    if(snap.empty){ showToast('Assignment not found.','err'); return; }
+    currentAssignment = snap.docs[0].data();
+    db.collection('tests').doc(testId).get().then(function(d){
+      var t = d.data();
+      // Load content
+      db.collection('tests').doc(testId).collection('content').doc('data').get().then(function(c){
+        resetTC(); if(c.exists) TC[testId]=normalizeTC(c.data());
+        curTid=testId; tdata=t;
+        // Show module picker with lock state
+        showAssignedModulePicker(testId, t, currentAssignment);
+      });
+    });
+  });
+}
+
+function showAssignedModulePicker(testId, t, asgn){
+  var modules = asgn.modules||{listening:true,reading:true,writing:true};
+  var isFullTest = asgn.mode==='full';
+  var dueStr = asgn.dueDate||'';
+  var h='<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'+
+    '<button class="btn btn-sm" onclick="backToStudentHome()">← Back</button>'+
+    '<div style="font-size:18px;font-weight:600">'+t.name+'</div>'+
+    (isFullTest?'<span class="badge b-pu">Full test — complete in order</span>':'')+
+    '</div>';
+  if(dueStr){
+    var due=new Date(dueStr),now=new Date(),diff=Math.ceil((due-now)/(1000*60*60*24));
+    var cls=diff<0?'overdue':diff<=3?'soon':'ok';
+    h+='<div class="due-badge '+cls+'" style="margin-bottom:16px;font-size:13px">📅 Due: '+due.toLocaleDateString()+(diff<0?' (Overdue)':diff<=3?' ('+diff+' days left)':'')+'</div>';
+  }
+  var modOrder = ['listening','reading','writing'];
+  var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+  var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+  var colors={listening:'var(--bll)',reading:'var(--grl)',writing:'var(--aml)'};
+  h+='<div>';
+  modOrder.forEach(function(m, mi){
+    var avail=modules[m];
+    // For full test, only first available unlocks; others unlock after previous done
+    var locked=!avail;
+    // TODO: check completions for sequential unlock
+    var cls='module-card'+(locked?' locked':'');
+    h+='<div class="'+cls+'" onclick="'+(locked?'showToast(\'This module is not available for this assignment.\',\'err\')':'startMod(\''+m+'\')')+'" style="background:'+(avail?colors[m]:'var(--bg)')+'">'+
+      '<div class="mc-icon" style="background:rgba(255,255,255,.4)">'+icons[m]+(locked?'🔒':'')+'</div>'+
+      '<div style="flex:1"><div style="font-size:14px;font-weight:600">'+labels[m]+'</div>'+
+      '<div style="font-size:12px;color:var(--mu)">'+(locked?'Not available for this assignment':(asgn.mode==='full'&&mi>0?'Complete '+(labels[modOrder[mi-1]])+' first':((tdata&&tdata[m+'Time']||{listening:30,reading:60,writing:60}[m])+' min')))+'</div></div>'+
+      (avail?'<span class="badge b-gr" style="font-size:11px">Available</span>':'<span class="badge b-gy" style="font-size:11px">Locked</span>')+
+      '</div>';
+  });
+  h+='</div>';
+  document.getElementById('shome').style.display='none';
+  var spick=document.getElementById('spick');
+  if(spick){ spick.style.display='block'; spick.innerHTML=h; }
+}
+
+function backToStudentHome(){
+  document.getElementById('shome').style.display='block';
+  var spick=document.getElementById('spick');
+  if(spick) spick.style.display='none';
+}
+
+// ── Notifications ──
+var notifOpen = false;
+var notifications = [];
+
+function togNotifDropdown(){
+  notifOpen = !notifOpen;
+  var dd = document.getElementById('t-notif-dropdown');
+  if(dd) dd.classList.toggle('open', notifOpen);
+  if(notifOpen) loadNotifications();
+}
+
+// Close when clicking outside
+document.addEventListener('click', function(e){
+  var bell = document.getElementById('t-bell');
+  var dd = document.getElementById('t-notif-dropdown');
+  if(dd && bell && !bell.contains(e.target) && !dd.contains(e.target)){
+    notifOpen=false; dd.classList.remove('open');
+  }
+});
+
+function loadNotifications(){
+  if(!CU||CRole!=='teacher') return;
+  db.collection('notifications').where('teacherId','==',CU.uid)
+    .orderBy('createdAt','desc').limit(20).get().then(function(snap){
+    notifications=[];
+    snap.forEach(function(d){ notifications.push(Object.assign({id:d.id},d.data())); });
+    rendNotifications();
+    updateBellBadge();
+  }).catch(function(){
+    // Index may not exist yet — show empty
+    document.getElementById('t-notif-list').innerHTML='<div class="notif-empty">No notifications yet.</div>';
+  });
+}
+
+function rendNotifications(){
+  var el=document.getElementById('t-notif-list');
+  if(!notifications.length){ el.innerHTML='<div class="notif-empty">No notifications yet.</div>'; return; }
+  el.innerHTML=notifications.map(function(n){
+    var time=n.createdAt?new Date(n.createdAt.toDate()).toLocaleString():'';
+    return '<div class="notif-item'+(n.read?'':' unread')+'" onclick="markRead(\''+n.id+'\')">'+
+      '<div class="ni-name">'+n.studentName+'</div>'+
+      '<div class="ni-detail">Completed <strong>'+n.module+'</strong> · '+n.testName+'</div>'+
+      '<div class="ni-time">'+time+'</div></div>';
+  }).join('');
+}
+
+function updateBellBadge(){
+  var unread=notifications.filter(function(n){return !n.read;}).length;
+  var badge=document.getElementById('t-bell-badge');
+  if(badge){ badge.style.display=unread?'flex':'none'; badge.textContent=unread>9?'9+':unread; }
+}
+
+function markRead(id){
+  db.collection('notifications').doc(id).update({read:true}).then(function(){
+    var n=notifications.find(function(x){return x.id===id;});
+    if(n) n.read=true;
+    rendNotifications(); updateBellBadge();
+  });
+}
+
+function markAllRead(){
+  var batch=db.batch();
+  notifications.filter(function(n){return !n.read;}).forEach(function(n){
+    batch.update(db.collection('notifications').doc(n.id),{read:true});
+  });
+  batch.commit().then(function(){
+    notifications.forEach(function(n){n.read=true;});
+    rendNotifications(); updateBellBadge();
+  });
+}
+
+// Create notification when student submits
+var _prevSubTest = subTest;
+subTest = function(){
+  // Call original
+  _prevSubTest();
+  // Create notification for teacher
+  if(CRole==='student'&&tdata&&tdata.teacherId){
+    db.collection('notifications').add({
+      teacherId: tdata.teacherId,
+      studentId: CU.uid,
+      studentName: document.getElementById('s-name').textContent,
+      testId: curTid,
+      testName: tdata.name||'Test',
+      module: revFrom,
+      read: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(){});
+  }
+};
+
+// Poll for new notifications every 60 seconds
+setInterval(function(){
+  if(CRole==='teacher'&&CU) loadNotifications();
+}, 60000);
+
+// Load notifications when teacher logs in
+var _prevLoadTeacher = loadTeacher;
+loadTeacher = function(d){
+  _prevLoadTeacher(d);
+  setTimeout(loadNotifications, 1000);
+};
+
+console.log('JIC IELTS — Assignment system loaded ✓');
+</script>
