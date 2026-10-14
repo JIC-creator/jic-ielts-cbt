@@ -7467,3 +7467,253 @@ function qgDrop(e, gi, mod, sp){
 
 console.log('JIC IELTS — reorderable question groups loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: MCQ multiple — correct question numbering
+//  Choose TWO = Q1 and Q2 share same options
+//  Choose THREE = Q1, Q2, Q3 share same options
+// ═══════════════════════════════════════════════
+
+// Override buildPrevQBlock for mcq2/mcq2r
+var _prevBuildPrevQBlock4 = buildPrevQBlock;
+buildPrevQBlock = function(g, getQNum){
+  if(g.type !== 'mcq2' && g.type !== 'mcq2r'){
+    return _prevBuildPrevQBlock4(g, getQNum);
+  }
+
+  var choose = g.chooseN || 2;
+  var numOpts = g.numOptions || 5;
+  var lastLetter = LETTERS[numOpts-1] || 'E';
+  var chooseWord = NUM_WORDS[choose] || choose;
+  var tl = 'Multiple Choice (choose '+chooseWord+')';
+
+  var h = '<div class="prev-qblock"><div class="prev-qtl">'+tl+'</div>';
+  if(g.instruction) h += '<div class="prev-inst">'+renderBold(g.instruction)+'</div>';
+
+  // Get the actual question numbers this group covers
+  // fromQ to toQ — each answer slot is one question number
+  var qNums = [];
+  for(var i = g.fromQ; i <= g.toQ; i++) qNums.push(i);
+
+  // Show question range
+  h += '<div style="font-size:13px;font-weight:500;margin-bottom:10px;line-height:1.6">';
+  if(g.questions && g.questions.length && g.questions[0].text){
+    h += renderBold(g.questions[0].text);
+  }
+  h += '</div>';
+
+  // Show question numbers this covers
+  h += '<div style="font-size:12px;color:var(--mu);margin-bottom:8px">'+
+    'Questions '+g.fromQ+(g.toQ>g.fromQ?'–'+g.toQ:'')+' · Choose <strong>'+chooseWord+'</strong> letters, A–'+lastLetter+
+    '</div>';
+
+  // Render options as checkboxes
+  // Students select exactly `choose` answers
+  // Each selected answer fills one question number slot
+  var groupId = 'mcqm-'+g.fromQ+'-'+g.toQ;
+  h += '<div id="'+groupId+'">';
+  for(var oi = 0; oi < numOpts; oi++){
+    var ltr = LETTERS[oi];
+    var optTxt = renderBold((g.questions && g.questions[0] && g.questions[0].options && g.questions[0].options[ltr]) || 'Option '+ltr);
+    h += '<label class="prev-opt" id="mcqm-opt-'+groupId+'-'+ltr+'" '+
+      'onclick="togMCQMv2(\''+groupId+'\',\''+ltr+'\','+choose+','+g.fromQ+','+g.toQ+')">' +
+      '<input type="checkbox" id="mcqmcb-'+groupId+'-'+ltr+'" value="'+ltr+'" onclick="event.stopPropagation()"> '+
+      '<strong>'+ltr+'.</strong> '+optTxt+'</label>';
+  }
+  h += '</div>';
+  h += '<div style="font-size:11px;color:var(--mu);margin-top:6px" id="mcqm-status-'+groupId+'">'+
+    'Selected: 0 / '+choose+' — fills Q'+g.fromQ+(g.toQ>g.fromQ?' to Q'+g.toQ:'')+
+    '</div>';
+
+  // Consume question numbers from counter
+  for(var qi = g.fromQ; qi <= g.toQ; qi++) getQNum();
+
+  h += '</div>';
+  return h;
+};
+
+// Updated toggle function for v2 — distributes answers across question numbers
+function togMCQMv2(groupId, letter, maxChoose, fromQ, toQ){
+  var cb = document.getElementById('mcqmcb-'+groupId+'-'+letter);
+  if(!cb) return;
+  // Get all checked letters for this group
+  var allLetters = [];
+  var lIdx = 0;
+  while(document.getElementById('mcqmcb-'+groupId+'-'+LETTERS[lIdx])){
+    allLetters.push(LETTERS[lIdx]); lIdx++;
+  }
+  // Toggle this checkbox
+  cb.checked = !cb.checked;
+  var checked = allLetters.filter(function(l){
+    var c = document.getElementById('mcqmcb-'+groupId+'-'+l);
+    return c && c.checked;
+  });
+  // Enforce limit
+  if(checked.length > maxChoose){
+    cb.checked = false;
+    checked = checked.filter(function(l){ return l !== letter; });
+    showToast('You can only choose '+maxChoose+' answer'+(maxChoose>1?'s':'')+'.','err');
+  }
+  // Update visual highlight
+  allLetters.forEach(function(l){
+    var lbl = document.getElementById('mcqm-opt-'+groupId+'-'+l);
+    var c2 = document.getElementById('mcqmcb-'+groupId+'-'+l);
+    if(lbl){
+      lbl.style.background = c2&&c2.checked?'var(--bll)':'';
+      lbl.style.borderColor = c2&&c2.checked?'var(--bl)':'';
+    }
+  });
+  // Distribute selected answers across question numbers
+  // Q fromQ gets first selected answer, Q fromQ+1 gets second, etc.
+  for(var qi = fromQ; qi <= toQ; qi++){
+    var slotIdx = qi - fromQ;
+    prevAnswers[qi] = checked[slotIdx] || '';
+  }
+  // Update status
+  var statusEl = document.getElementById('mcqm-status-'+groupId);
+  if(statusEl){
+    var ok = checked.length === maxChoose;
+    statusEl.innerHTML = 'Selected: <strong style="color:'+(ok?'var(--gr)':'var(--t)')+'">'+
+      checked.join(', ')+(checked.length?'':'none')+
+      '</strong> ('+checked.length+' / '+maxChoose+')'+
+      (ok?' ✓ — Q'+fromQ+(toQ>fromQ?' to Q'+toQ:'')+' filled':'');
+    statusEl.style.color = ok?'var(--gr)':'var(--mu)';
+  }
+}
+
+// Fix openQ for mcq2/mcq2r — the question stem and options
+// apply to ALL question numbers in the range, not just one
+var _prevOpenQ3 = openQ;
+openQ = function(mod, sp, gi){
+  qCtx = {mod:mod, sp:sp, gi:gi};
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  if(g.type !== 'mcq2' && g.type !== 'mcq2r'){
+    _prevOpenQ3(mod, sp, gi);
+    return;
+  }
+  // For mcq2, there's only ONE question entry per group
+  // (the stem + options apply to the whole fromQ–toQ range)
+  var choose = g.chooseN || 2;
+  var numOpts = g.numOptions || 5;
+  var lastLetter = LETTERS[numOpts-1]||'E';
+  var chooseWord = NUM_WORDS[choose]||choose;
+  // Check if question already exists
+  if(g.questions && g.questions.length > 0){
+    showToast('This group already has its question stem. Use Edit to modify it.','err');
+    return;
+  }
+  var qn = g.fromQ;
+  document.getElementById('q-title').textContent =
+    'Add question stem — Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+' (Choose '+chooseWord+')';
+  var h = '<input type="hidden" id="qn" value="'+qn+'">';
+  h += '<div style="background:var(--bll);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:13px;color:#0C447C">'+
+    '⚠️ This question group covers <strong>Q'+g.fromQ+(g.toQ>g.fromQ?' to Q'+g.toQ:'')+
+    '</strong>. Students choose <strong>'+chooseWord+'</strong> letters from the options below — '+
+    'each selected letter fills one question number slot.</div>';
+  h += '<div class="fr"><label class="fl">Question stem (optional)</label>'+
+    '<textarea class="inp" id="qt" rows="2" placeholder="e.g. Which TWO of the following are mentioned..."></textarea></div>';
+  h += '<div style="font-size:12px;font-weight:600;color:var(--mu);margin-bottom:10px">Options ('+LETTERS[0]+'–'+lastLetter+')</div>';
+  for(var i=0; i<numOpts; i++){
+    var l = LETTERS[i];
+    h += '<div class="fr"><label class="fl">Option '+l+'</label>'+
+      '<input class="inp" id="qo'+l+'" placeholder="Option '+l+'..."></div>';
+  }
+  h += '<div class="fr"><label class="fl">Correct answers (comma separated, e.g. A,C)</label>'+
+    '<input class="inp" id="qa" placeholder="e.g. A,C"></div>';
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = saveMCQMQuestion;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Save question';
+  openM('q');
+};
+
+function saveMCQMQuestion(){
+  var tc = getTC();
+  var g = qCtx.mod==='listening' ?
+    tc.listening.sections[qCtx.sp].groups[qCtx.gi] :
+    tc.reading.passages[qCtx.sp].groups[qCtx.gi];
+  var text = (document.getElementById('qt')||{}).value||'';
+  var ans = (document.getElementById('qa')||{}).value||'';
+  var opts = {};
+  'ABCDEFGH'.split('').forEach(function(l){
+    var el = document.getElementById('qo'+l);
+    if(el && el.value) opts[l] = el.value;
+  });
+  // Store as questions for each Q number in range
+  g.questions = [];
+  for(var qi = g.fromQ; qi <= g.toQ; qi++){
+    var slotIdx = qi - g.fromQ;
+    var correctLetter = (ans.split(',').map(function(a){return a.trim();}))[slotIdx]||'';
+    g.questions.push({
+      num:qi, text:qi===g.fromQ?text:'', // stem only on first
+      options: qi===g.fromQ?opts:{},
+      answer:correctLetter.toUpperCase(),
+      type:g.type,
+      isPartOfGroup:true,
+      groupFromQ:g.fromQ, groupToQ:g.toQ
+    });
+  }
+  closeM('q');
+  showToast('MCQ multiple question saved!');
+  renderMod(curTOwner==='admin'?'a':'t', qCtx.mod);
+}
+
+// Fix rendQGCard to show mcq2 properly in editor
+var _prevRendQGCard2 = rendQGCard;
+rendQGCard = function(g, gi, mod, sp){
+  // For mcq2, override question display to show all Q numbers covered
+  if(g.type==='mcq2'||g.type==='mcq2r'){
+    var choose = g.chooseN||2;
+    var numOpts = g.numOptions||5;
+    var lastLetter = LETTERS[numOpts-1]||'E';
+    var chooseWord = NUM_WORDS[choose]||choose;
+    var tl = 'Multiple Choice (choose '+chooseWord+')';
+    var h = '<div class="qb" id="qg-card-'+gi+'" draggable="true" '+
+      'ondragstart="qgDragStart(event,'+gi+',\''+mod+'\','+sp+')" '+
+      'ondragover="qgDragOver(event,'+gi+')" '+
+      'ondragleave="qgDragLeave(event,'+gi+')" '+
+      'ondrop="qgDrop(event,'+gi+',\''+mod+'\','+sp+')">';
+    h += '<div class="qb-hdr" onclick="togQB(this)">'+
+      '<span class="qb-drag-handle" onclick="event.stopPropagation()">⠿</span>'+
+      '<div class="qb-num">'+(gi+1)+'</div>'+
+      '<div class="qb-title">Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+' · '+tl+'</div>'+
+      '<span class="qtb">Choose '+chooseWord+' from A–'+lastLetter+'</span>'+
+      '<div style="margin-left:auto;display:flex;gap:4px;align-items:center">'+
+      '<div class="qb-reorder-btns" onclick="event.stopPropagation()">'+
+      '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',-1)">▲</button>'+
+      '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',1)">▼</button>'+
+      '</div>'+
+      '<button class="btn btn-sm" onclick="event.stopPropagation();openEditQG(\''+mod+'\','+sp+','+gi+')">✏️ Edit</button>'+
+      '<button class="btn btn-sm btn-d" onclick="event.stopPropagation();rmQG(\''+mod+'\','+sp+','+gi+')">🗑</button>'+
+      '</div></div>';
+    h += '<div class="qb-body">';
+    h += '<div style="font-size:12px;color:var(--mu);margin-bottom:8px">'+
+      renderBold(g.instruction||'')+'</div>';
+    h += '<div style="background:var(--bll);border-radius:var(--r);padding:8px 12px;font-size:13px;margin-bottom:8px">'+
+      '<strong>Q'+g.fromQ+(g.toQ>g.fromQ?'–Q'+g.toQ:'')+'</strong> · Students choose '+
+      '<strong>'+chooseWord+'</strong> letters, A–'+lastLetter+
+      ' · Each answer fills one question slot</div>';
+    if(g.questions&&g.questions.length){
+      var stemQ = g.questions[0];
+      if(stemQ.text) h += '<div style="font-size:13px;margin-bottom:8px">'+renderBold(stemQ.text)+'</div>';
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">';
+      Object.keys(stemQ.options||{}).forEach(function(l){
+        h += '<div style="font-size:12px;padding:4px 8px;background:var(--bg);border-radius:4px">'+
+          '<strong>'+l+'.</strong> '+stemQ.options[l]+'</div>';
+      });
+      h += '</div>';
+      h += '<div style="margin-top:8px;font-size:12px;color:var(--mu)">Answers: '+
+        g.questions.map(function(q){ return '<span class="tag">Q'+q.num+': '+( q.answer||'?')+'</span>'; }).join('')+'</div>';
+    } else {
+      h += '<button class="btn btn-p btn-sm" onclick="openQ(\''+mod+'\','+sp+','+gi+')">+ Add question stem & options</button>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+  return _prevRendQGCard2(g, gi, mod, sp);
+};
+
+console.log('JIC IELTS — MCQ multiple numbering fix loaded ✓');
+</script>
