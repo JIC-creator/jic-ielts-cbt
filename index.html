@@ -8881,3 +8881,317 @@ rendNotifications = function(){
 
 console.log('JIC IELTS — Teacher sharing + admin promotion loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  READING CLASSROOM — Location + Answer highlights
+//  Same as Listening but for passage text
+// ═══════════════════════════════════════════════
+
+// ── CSS ──
+var readingHLCSS = document.createElement('style');
+readingHLCSS.textContent = `
+/* Reading highlights */
+.hl-location {
+  background: rgba(24,95,165,.25);
+  border-radius: 3px;
+  padding: 1px 0;
+  cursor: pointer;
+  border-bottom: 2px solid var(--bl);
+  transition: background .15s;
+}
+.hl-location:hover { background: rgba(24,95,165,.45); }
+.hl-location.hidden-hl { background: transparent; border-bottom: none; }
+
+.hl-reading-ans {
+  background: rgba(29,158,117,.3);
+  border-radius: 3px;
+  padding: 1px 0;
+  cursor: pointer;
+  border-bottom: 2px solid var(--gr);
+  transition: background .15s;
+}
+.hl-reading-ans:hover { background: rgba(29,158,117,.55); }
+.hl-reading-ans.hidden-hl { background: transparent; border-bottom: none; }
+
+/* Reading highlight popup */
+.hl-popup-reading {
+  position: fixed;
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: var(--r);
+  padding: 8px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 999;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  min-width: 200px;
+}
+.hl-popup-reading.open { display: flex; }
+.hl-popup-reading button {
+  padding: 7px 14px;
+  border-radius: var(--r);
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.hl-popup-reading .loc-btn {
+  background: rgba(24,95,165,.3);
+  color: #7EB8F7;
+  border: 1px solid #7EB8F7;
+}
+.hl-popup-reading .rans-btn {
+  background: rgba(29,158,117,.3);
+  color: #5DCAA5;
+  border: 1px solid var(--gr);
+}
+.hl-popup-reading .cancel-btn {
+  background: rgba(255,255,255,.1);
+  color: #ccc;
+  border: 1px solid rgba(255,255,255,.2);
+}
+
+/* Reading toggle buttons in classroom */
+.cm-btn.loc-btn.active { background: rgba(24,95,165,.3); border-color: #7EB8F7; color: #7EB8F7; }
+.cm-btn.rans-btn.active { background: rgba(29,158,117,.2); border-color: var(--gr); color: #5DCAA5; }
+`;
+document.head.appendChild(readingHLCSS);
+
+// ── Reading highlight popup ──
+var rHLPopup = document.createElement('div');
+rHLPopup.className = 'hl-popup-reading';
+rHLPopup.id = 'hl-popup-reading';
+rHLPopup.innerHTML =
+  '<button class="loc-btn" onclick="applyRHL(\'location\')">📍 Mark as location</button>'+
+  '<button class="rans-btn" onclick="applyRHL(\'reading-ans\')">✅ Mark as answer</button>'+
+  '<button class="cancel-btn" onclick="closeRHLPopup()">✕ Cancel</button>';
+document.body.appendChild(rHLPopup);
+
+// ── State ──
+var cmReadingHighlights = {}; // {pasNum: [{id, type, text, start, end}]}
+var cmPendingRRange = null;
+var cmShowLocations = false, cmShowReadingAns = false;
+var cmCurPassageHL = 1;
+
+// ── Override switchCMSubject to add reading toggle buttons ──
+var _prevSwitchCMSubject2 = switchCMSubject;
+switchCMSubject = function(subject, el){
+  _prevSwitchCMSubject2(subject, el);
+  var tbtns = document.getElementById('cm-toggle-btns');
+  if(!tbtns) return;
+  if(subject === 'reading'){
+    tbtns.style.display = 'flex';
+    tbtns.innerHTML =
+      '<button class="cm-btn loc-btn" id="cm-loc-btn" onclick="togRHL(\'location\')">📍 Locations</button>'+
+      '<button class="cm-btn rans-btn" id="cm-rans-btn" onclick="togRHL(\'reading-ans\')">✅ Answers</button>';
+    // Load reading highlights
+    loadReadingHighlights();
+  } else if(subject === 'listening'){
+    // Restore listening toggles
+    tbtns.style.display = 'flex';
+    tbtns.innerHTML =
+      '<button class="cm-btn" id="cm-transcript-btn" onclick="togCMPanel(\'transcript\')">📄 Transcript</button>'+
+      '<button class="cm-btn clue-btn" id="cm-clue-btn" onclick="togCMHL(\'clue\')">💡 Clues</button>'+
+      '<button class="cm-btn ans-btn" id="cm-ans-btn" onclick="togCMHL(\'ans\')">✅ Answers</button>';
+  } else {
+    tbtns.style.display = 'none';
+  }
+};
+
+function loadReadingHighlights(){
+  if(!cmTestId) return;
+  db.collection('tests').doc(cmTestId).collection('reading_highlights').doc('data').get().then(function(d){
+    cmReadingHighlights = d.exists ? (d.data().highlights||{}) : {};
+    // Re-render current passage with highlights
+    showCMPassage(cmCurPassage);
+  }).catch(function(){
+    cmReadingHighlights = {};
+  });
+}
+
+function saveReadingHighlights(){
+  if(!cmTestId) return;
+  db.collection('tests').doc(cmTestId).collection('reading_highlights').doc('data').set({
+    highlights: cmReadingHighlights,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(function(e){ showToast('Failed to save highlights: '+e.message,'err'); });
+}
+
+// ── Override showCMPassage to include highlights ──
+var _prevShowCMPassage = showCMPassage;
+showCMPassage = function(n){
+  cmCurPassageHL = n;
+  _prevShowCMPassage(n);
+  // Re-render passage with highlights
+  setTimeout(function(){ renderCMPassageWithHL(n); }, 50);
+};
+
+function renderCMPassageWithHL(pasNum){
+  var pp = document.getElementById('cm-passage-panel');
+  if(!pp) return;
+  var passes = cmTestContent&&cmTestContent.reading&&cmTestContent.reading.passages||{};
+  var pas = passes[pasNum]||passes[String(pasNum)];
+  if(!pas||!pas.text) return;
+  var h = '';
+  if(pas.instruction){
+    h += '<div style="font-size:12px;color:var(--mu);font-style:italic;margin-bottom:12px;padding:8px 10px;background:var(--bg);border-radius:var(--r)">'+renderBold(pas.instruction)+'</div>';
+  }
+  h += '<h2>'+(pas.title||'Reading Passage '+pasNum)+'</h2>';
+  // Build annotated passage text
+  var annotated = buildAnnotatedPassage(pas.text, pasNum);
+  h += '<div id="cm-passage-text" onmouseup="onPassageTxtSelect('+pasNum+')" style="line-height:2;font-size:14px;user-select:text;cursor:text">'+annotated+'</div>';
+  // Add teacher instruction
+  if(CRole==='teacher'||CRole==='admin'){
+    if(!h.includes('hl-reading-instruction')){
+      h += '<div id="hl-reading-instruction" style="font-size:11px;color:var(--mu);margin-top:16px;padding:8px;background:var(--bg);border-radius:var(--r);border:1px dashed var(--bm)">'+
+        '✏️ Select any text in the passage to mark it as a Location or Answer.</div>';
+    }
+  }
+  pp.innerHTML = h;
+  applyRHLVisibility();
+}
+
+function buildAnnotatedPassage(text, pasNum){
+  var hls = (cmReadingHighlights[pasNum]||[]).slice().sort(function(a,b){ return a.start-b.start; });
+  if(!hls.length) return renderPassageText(text);
+  var result = '', last = 0;
+  hls.forEach(function(hl){
+    if(hl.start < last) return;
+    if(hl.start > last) result += renderPassageText(text.slice(last, hl.start));
+    result += '<span class="hl-'+hl.type+'" data-rhl-id="'+hl.id+'" data-pas="'+pasNum+'" '+
+      'onclick="removeRHL(\''+hl.id+'\','+pasNum+')">'+
+      escHTMLCm(text.slice(hl.start, hl.end))+'</span>';
+    last = hl.end;
+  });
+  if(last < text.length) result += renderPassageText(text.slice(last));
+  return result;
+}
+
+function renderPassageText(text){
+  return escHTMLCm(text).replace(/\n/g,'<br>');
+}
+
+// ── Text selection in passage ──
+var cmPendingRPasNum = null;
+function onPassageTxtSelect(pasNum){
+  if(CRole!=='teacher'&&CRole!=='admin') return;
+  cmPendingRPasNum = pasNum;
+  var sel = window.getSelection();
+  if(!sel||sel.isCollapsed||!sel.toString().trim()) return;
+  var container = document.getElementById('cm-passage-text');
+  if(!container) return;
+  var range = sel.getRangeAt(0);
+  if(!container.contains(range.commonAncestorContainer)) return;
+  var startOffset = getPlainTextOffset(container, range.startContainer, range.startOffset);
+  var endOffset = getPlainTextOffset(container, range.endContainer, range.endOffset);
+  if(startOffset===null||endOffset===null||startOffset>=endOffset) return;
+  cmPendingRRange = { text:sel.toString(), start:startOffset, end:endOffset };
+  // Show popup
+  var rect = range.getBoundingClientRect();
+  var popup = document.getElementById('hl-popup-reading');
+  popup.classList.add('open');
+  var left = rect.left + window.scrollX;
+  var top = rect.bottom + window.scrollY + 6;
+  if(left + 220 > window.innerWidth) left = window.innerWidth - 230;
+  popup.style.left = left+'px';
+  popup.style.top = top+'px';
+}
+
+function closeRHLPopup(){
+  document.getElementById('hl-popup-reading').classList.remove('open');
+  cmPendingRRange = null;
+  window.getSelection()&&window.getSelection().removeAllRanges();
+}
+
+function applyRHL(type){
+  if(!cmPendingRRange||cmPendingRPasNum===null){ closeRHLPopup(); return; }
+  var pasNum = cmPendingRPasNum;
+  if(!cmReadingHighlights[pasNum]) cmReadingHighlights[pasNum] = [];
+  var start = cmPendingRRange.start, end = cmPendingRRange.end;
+  var text = cmPendingRRange.text;
+  // Verify offset
+  var passes = cmTestContent&&cmTestContent.reading&&cmTestContent.reading.passages||{};
+  var pas = passes[pasNum]||passes[String(pasNum)];
+  var passageText = pas&&pas.text||'';
+  var extracted = passageText.slice(start, end);
+  if(extracted.trim() !== text.trim()){
+    var idx = passageText.indexOf(text.trim());
+    if(idx >= 0){ start = idx; end = start + text.trim().length; }
+    else { showToast('Could not place highlight accurately. Try again.','err'); closeRHLPopup(); return; }
+  }
+  // Check overlap
+  var overlaps = cmReadingHighlights[pasNum].some(function(hl){
+    return !(end<=hl.start||start>=hl.end);
+  });
+  if(overlaps){ showToast('Cannot overlap existing highlights.','err'); closeRHLPopup(); return; }
+  var id = 'rhl-'+Date.now();
+  cmReadingHighlights[pasNum].push({ id:id, type:type, text:text.trim(), start:start, end:end });
+  saveReadingHighlights();
+  closeRHLPopup();
+  renderCMPassageWithHL(pasNum);
+  // Auto-enable toggle
+  if(type==='location'&&!cmShowLocations) togRHL('location');
+  if(type==='reading-ans'&&!cmShowReadingAns) togRHL('reading-ans');
+  showToast(type==='location'?'📍 Location marked!':'✅ Answer marked!');
+}
+
+function removeRHL(id, pasNum){
+  if(CRole!=='teacher'&&CRole!=='admin') return;
+  if(!confirm('Remove this highlight?')) return;
+  cmReadingHighlights[pasNum] = (cmReadingHighlights[pasNum]||[]).filter(function(hl){ return hl.id!==id; });
+  saveReadingHighlights();
+  renderCMPassageWithHL(pasNum);
+}
+
+function togRHL(type){
+  if(type==='location'){
+    cmShowLocations = !cmShowLocations;
+    var btn = document.getElementById('cm-loc-btn');
+    if(btn) btn.classList.toggle('active', cmShowLocations);
+  } else {
+    cmShowReadingAns = !cmShowReadingAns;
+    var btn2 = document.getElementById('cm-rans-btn');
+    if(btn2) btn2.classList.toggle('active', cmShowReadingAns);
+  }
+  applyRHLVisibility();
+}
+
+function applyRHLVisibility(){
+  document.querySelectorAll('.hl-location').forEach(function(el){
+    el.classList.toggle('hidden-hl', !cmShowLocations);
+  });
+  document.querySelectorAll('.hl-reading-ans').forEach(function(el){
+    el.classList.toggle('hidden-hl', !cmShowReadingAns);
+  });
+}
+
+// Close reading popup when clicking outside
+document.addEventListener('mousedown', function(e){
+  var popup = document.getElementById('hl-popup-reading');
+  if(popup&&popup.classList.contains('open')&&!popup.contains(e.target)){
+    var pt = document.getElementById('cm-passage-text');
+    if(!pt||!pt.contains(e.target)) closeRHLPopup();
+  }
+});
+
+// ── Override enterClassroom to load reading highlights too ──
+var _prevEnterClassroom3 = enterClassroom;
+enterClassroom = function(testId, testData, testContent, userRole){
+  cmReadingHighlights = {};
+  cmShowLocations = false;
+  cmShowReadingAns = false;
+  _prevEnterClassroom3(testId, testData, testContent, userRole);
+  // Load reading highlights
+  db.collection('tests').doc(testId).collection('reading_highlights').doc('data').get().then(function(d){
+    cmReadingHighlights = d.exists ? (d.data().highlights||{}) : {};
+  }).catch(function(){});
+};
+
+// Student visibility check — only show highlights if teacher enabled it
+// (For now highlights are always visible to all in classroom mode)
+
+console.log('JIC IELTS — Reading classroom highlights (Location + Answer) loaded ✓');
+</script>
