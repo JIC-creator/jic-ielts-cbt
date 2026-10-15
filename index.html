@@ -11505,3 +11505,457 @@ backToStudentHome = function(){
 
 console.log('JIC IELTS — student portal fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  RESULTS SYSTEM
+//  - Band score conversion tables
+//  - Teacher results page with release per submission
+//  - Student results view
+//  - Writing manual grading
+// ═══════════════════════════════════════════════
+
+// ── Band Score Conversion Tables ──
+var BAND_LISTENING = [
+  {min:39,max:40,band:9.0},{min:37,max:38,band:8.5},{min:35,max:36,band:8.0},
+  {min:33,max:34,band:7.5},{min:30,max:32,band:7.0},{min:27,max:29,band:6.5},
+  {min:23,max:26,band:6.0},{min:20,max:22,band:5.5},{min:16,max:19,band:5.0},
+  {min:13,max:15,band:4.5},{min:11,max:12,band:4.0},{min:8,max:10,band:3.5},
+  {min:6,max:7,band:3.0},{min:4,max:5,band:2.5},{min:3,max:3,band:2.0},
+  {min:2,max:2,band:1.5},{min:1,max:1,band:1.0}
+];
+var BAND_READING_ACADEMIC = [
+  {min:39,max:40,band:9.0},{min:37,max:38,band:8.5},{min:35,max:36,band:8.0},
+  {min:33,max:34,band:7.5},{min:30,max:32,band:7.0},{min:27,max:29,band:6.5},
+  {min:23,max:26,band:6.0},{min:19,max:22,band:5.5},{min:15,max:18,band:5.0},
+  {min:13,max:14,band:4.5},{min:10,max:12,band:4.0},{min:8,max:9,band:3.5},
+  {min:6,max:7,band:3.0},{min:4,max:5,band:2.5},{min:3,max:3,band:2.0},
+  {min:2,max:2,band:1.5},{min:1,max:1,band:1.0}
+];
+var BAND_READING_GT = [
+  {min:40,max:40,band:9.0},{min:39,max:39,band:8.5},{min:38,max:38,band:8.0},
+  {min:36,max:37,band:7.5},{min:34,max:35,band:7.0},{min:32,max:33,band:6.5},
+  {min:30,max:31,band:6.0},{min:27,max:29,band:5.5},{min:23,max:26,band:5.0},
+  {min:19,max:22,band:4.5},{min:15,max:18,band:4.0},{min:11,max:14,band:3.5},
+  {min:8,max:10,band:3.0},{min:5,max:7,band:2.5},{min:3,max:4,band:2.0},
+  {min:2,max:2,band:1.5},{min:1,max:1,band:1.0}
+];
+
+function getBand(correct, module, testType){
+  var table;
+  if(module==='listening') table=BAND_LISTENING;
+  else if(module==='reading'){
+    table=(testType&&testType.toLowerCase().includes('general'))?BAND_READING_GT:BAND_READING_ACADEMIC;
+  } else return null;
+  if(correct===null||correct===undefined) return null;
+  for(var i=0;i<table.length;i++){
+    if(correct>=table[i].min&&correct<=table[i].max) return table[i].band;
+  }
+  return 0;
+}
+
+function bandColor(band){
+  if(band>=7.0) return 'var(--gr)';
+  if(band>=5.5) return 'var(--am)';
+  return 'var(--rd)';
+}
+
+function bandBg(band){
+  if(band>=7.0) return 'var(--grl)';
+  if(band>=5.5) return 'var(--aml)';
+  return 'var(--rdl)';
+}
+
+// ── CSS ──
+var resultCSS = document.createElement('style');
+resultCSS.textContent = `
+.result-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.result-card-hdr {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--b);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.result-card-body { padding: 14px 16px; }
+.band-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  font-size: 18px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--b);
+}
+.score-row:last-child { border-bottom: none; }
+.score-module-icon { font-size: 22px; width: 36px; text-align: center; flex-shrink: 0; }
+.score-info { flex: 1; }
+.score-title { font-size: 13px; font-weight: 600; }
+.score-sub { font-size: 12px; color: var(--mu); margin-top: 2px; }
+.score-band-wrap { text-align: center; min-width: 60px; }
+.score-band-num { font-size: 22px; font-weight: 800; line-height: 1; }
+.score-band-lbl { font-size: 10px; color: var(--mu); margin-top: 2px; }
+.score-raw { font-size: 12px; color: var(--mu); text-align: center; min-width: 50px; }
+.release-btn { flex-shrink: 0; }
+.writing-review-box {
+  background: var(--bg);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--t);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  border: 1px solid var(--b);
+}
+.grade-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bll);
+  border-radius: var(--r);
+}
+/* Student result card */
+.s-result-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.s-result-hdr {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.s-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--b);
+}
+.s-score-row:last-child { border-bottom: none; }
+.pending-badge {
+  background: var(--bg);
+  color: var(--mu);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--bm);
+}
+`;
+document.head.appendChild(resultCSS);
+
+// ── TEACHER RESULTS PAGE ──
+function loadTeacherResults(){
+  var el = document.getElementById('t-results-list');
+  if(!el){
+    // Create results section if not exists
+    var ap = document.getElementById('ta-results');
+    if(!ap) return;
+    ap.innerHTML = '<div style="font-size:18px;font-weight:600;margin-bottom:16px">Results</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">'+
+        '<select class="inp" id="res-filter-test" style="width:auto" onchange="filterResults()"><option value="">All tests</option></select>'+
+        '<select class="inp" id="res-filter-mod" style="width:auto" onchange="filterResults()">'+
+          '<option value="">All modules</option>'+
+          '<option value="listening">Listening</option>'+
+          '<option value="reading">Reading</option>'+
+          '<option value="writing">Writing</option>'+
+        '</select>'+
+        '<select class="inp" id="res-filter-status" style="width:auto" onchange="filterResults()">'+
+          '<option value="">All statuses</option>'+
+          '<option value="released">Released</option>'+
+          '<option value="pending">Pending release</option>'+
+        '</select>'+
+      '</div>'+
+      '<div id="t-results-list"></div>';
+    el = document.getElementById('t-results-list');
+  }
+  el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mu)"><div style="font-size:32px;margin-bottom:8px">⏳</div>Loading results...</div>';
+  db.collection('results')
+    .where('teacherId','==',CU.uid)
+    .orderBy('submittedAt','desc')
+    .get()
+    .then(function(snap){
+      window._allResults = [];
+      snap.forEach(function(d){ window._allResults.push(Object.assign({id:d.id},d.data())); });
+      // Populate test filter
+      var testNames = {};
+      window._allResults.forEach(function(r){ if(r.testName) testNames[r.testId]=r.testName; });
+      var filterEl = document.getElementById('res-filter-test');
+      if(filterEl){
+        Object.keys(testNames).forEach(function(tid){
+          var opt = document.createElement('option');
+          opt.value = tid; opt.textContent = testNames[tid];
+          filterEl.appendChild(opt);
+        });
+      }
+      filterResults();
+    })
+    .catch(function(e){
+      el.innerHTML = '<div style="color:var(--rd);padding:16px">Error: '+e.message+'<br><br>'+
+        '<small>You may need to create a Firestore index. Check the browser console for a link.</small></div>';
+    });
+}
+
+window._allResults = [];
+function filterResults(){
+  var testF = (document.getElementById('res-filter-test')||{}).value||'';
+  var modF = (document.getElementById('res-filter-mod')||{}).value||'';
+  var statF = (document.getElementById('res-filter-status')||{}).value||'';
+  var filtered = window._allResults.filter(function(r){
+    if(testF && r.testId!==testF) return false;
+    if(modF && r.module!==modF) return false;
+    if(statF==='released' && !r.released) return false;
+    if(statF==='pending' && r.released) return false;
+    return true;
+  });
+  rendTeacherResults(filtered);
+}
+
+function rendTeacherResults(results){
+  var el = document.getElementById('t-results-list');
+  if(!el) return;
+  if(!results.length){
+    el.innerHTML = '<div style="color:var(--mu);font-size:13px;text-align:center;padding:32px">'+
+      '<div style="font-size:36px;margin-bottom:8px">📊</div>No results yet.</div>';
+    return;
+  }
+  el.innerHTML = results.map(function(r){
+    var mod = r.module||'';
+    var icons = {listening:'🎧',reading:'📖',writing:'✏️'};
+    var icon = icons[mod]||'📝';
+    var submitted = r.submittedAt ? new Date(r.submittedAt.toDate()).toLocaleString() : '—';
+    var band = (mod==='listening'||mod==='reading') ? getBand(r.correct, mod, r.testType||'Academic') : null;
+    var isWriting = mod==='writing';
+    var h = '<div class="result-card" id="rc-'+r.id+'">';
+    // Header
+    h += '<div class="result-card-hdr">'+
+      '<div style="display:flex;align-items:center;gap:10px">'+
+        '<div style="width:38px;height:38px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0">'+
+          (r.studentName||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2)+
+        '</div>'+
+        '<div>'+
+          '<div style="font-size:14px;font-weight:600">'+r.studentName+'</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+r.testName+' · '+icon+' '+mod.charAt(0).toUpperCase()+mod.slice(1)+'</div>'+
+          '<div style="font-size:11px;color:var(--hi)">'+submitted+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:8px">'+
+        (r.released ?
+          '<span class="badge b-gr">✓ Released</span>' :
+          '<span class="badge b-am">Pending</span>')+
+      '</div>'+
+    '</div>';
+    // Body
+    h += '<div class="result-card-body">';
+    if(isWriting){
+      // Writing — show essays + grade input
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
+      if(r.writingTask1){
+        h += '<div>'+
+          '<div style="font-size:12px;font-weight:600;margin-bottom:6px">Task 1 ('+countWords2(r.writingTask1)+' words)</div>'+
+          '<div class="writing-review-box">'+escHTMLCm(r.writingTask1)+'</div>'+
+          '</div>';
+      }
+      if(r.writingTask2){
+        h += '<div>'+
+          '<div style="font-size:12px;font-weight:600;margin-bottom:6px">Task 2 ('+countWords2(r.writingTask2)+' words)</div>'+
+          '<div class="writing-review-box">'+escHTMLCm(r.writingTask2)+'</div>'+
+          '</div>';
+      }
+      h += '</div>';
+      // Grade input
+      h += '<div class="grade-input-wrap">'+
+        '<span style="font-size:13px;font-weight:500">Writing band score:</span>'+
+        '<input class="inp" type="number" id="w-grade-'+r.id+'" value="'+(r.writingBand||'')+'" min="1" max="9" step="0.5" placeholder="e.g. 6.5" style="width:90px">'+
+        '<span style="font-size:12px;color:var(--mu)">(1.0 – 9.0 in 0.5 steps)</span>'+
+        '<button class="btn btn-p btn-sm release-btn" onclick="releaseResult(\''+r.id+'\',\'writing\')">'+
+          (r.released?'✓ Update & release':'📤 Grade & release')+
+        '</button>'+
+      '</div>';
+    } else {
+      // Listening / Reading — show auto score
+      h += '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">';
+      // Band circle
+      if(band!==null){
+        h += '<div class="band-badge" style="background:'+bandBg(band)+';color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>';
+      }
+      h += '<div style="flex:1">'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:4px">Raw score</div>'+
+        '<div style="font-size:24px;font-weight:700">'+(r.correct||0)+' / '+(r.total||40)+'</div>'+
+        (band!==null?'<div style="font-size:12px;color:'+bandColor(band)+';font-weight:600;margin-top:2px">Band '+band.toFixed(1)+'</div>':'')+
+      '</div>';
+      h += '<button class="btn '+(r.released?'btn-sm b-gr':'btn-p btn-sm')+' release-btn" onclick="releaseResult(\''+r.id+'\',\''+mod+'\')">'+
+        (r.released?'✓ Released':'📤 Release to student')+
+      '</button>';
+      h += '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }).join('');
+}
+
+function releaseResult(resultId, mod){
+  var data = { released: true, releasedAt: firebase.firestore.FieldValue.serverTimestamp() };
+  if(mod==='writing'){
+    var gradeEl = document.getElementById('w-grade-'+resultId);
+    var band = gradeEl ? parseFloat(gradeEl.value) : null;
+    if(!band||band<1||band>9){ showToast('Please enter a valid band score (1.0–9.0).','err'); return; }
+    data.writingBand = band;
+    data.band = band;
+  }
+  db.collection('results').doc(resultId).update(data).then(function(){
+    showToast('✓ Result released to student!');
+    // Update local cache
+    var r = (window._allResults||[]).find(function(x){return x.id===resultId;});
+    if(r){ r.released=true; if(data.writingBand) r.writingBand=data.writingBand; }
+    filterResults();
+    // Notify student
+    var res = (window._allResults||[]).find(function(x){return x.id===resultId;});
+    if(res&&res.studentId){
+      db.collection('notifications').add({
+        userId: res.studentId,
+        type: 'result_released',
+        testName: res.testName,
+        module: res.module,
+        read: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(function(){});
+    }
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── STUDENT RESULTS VIEW ──
+function loadStudentResults(){
+  var el = document.getElementById('s-results');
+  if(!el) return;
+  el.innerHTML = '<div style="color:var(--mu);font-size:13px;text-align:center;padding:16px">Loading...</div>';
+  db.collection('results')
+    .where('studentId','==',CU.uid)
+    .orderBy('submittedAt','desc')
+    .get()
+    .then(function(snap){
+      var results = [];
+      snap.forEach(function(d){ results.push(Object.assign({id:d.id},d.data())); });
+      rendStudentResults(results);
+    })
+    .catch(function(e){
+      // If index missing, try without orderBy
+      db.collection('results').where('studentId','==',CU.uid).get().then(function(snap){
+        var results = [];
+        snap.forEach(function(d){ results.push(Object.assign({id:d.id},d.data())); });
+        rendStudentResults(results);
+      }).catch(function(){ el.innerHTML='<div style="color:var(--mu);font-size:13px">Could not load results.</div>'; });
+    });
+}
+
+function rendStudentResults(results){
+  var el = document.getElementById('s-results');
+  if(!el) return;
+  if(!results.length){
+    el.innerHTML = '<div style="color:var(--mu);font-size:13px;padding:12px 0">No completed tests yet.</div>';
+    return;
+  }
+  // Group by test
+  var byTest = {};
+  results.forEach(function(r){
+    if(!byTest[r.testId]) byTest[r.testId]={testName:r.testName,testType:r.testType||'Academic',modules:[]};
+    byTest[r.testId].modules.push(r);
+  });
+  el.innerHTML = Object.keys(byTest).map(function(tid){
+    var t = byTest[tid];
+    var h = '<div class="s-result-card">';
+    h += '<div class="s-result-hdr">'+
+      '<div style="font-size:14px;font-weight:600">'+t.testName+'</div>'+
+      '<span style="font-size:12px;color:var(--mu)">'+t.testType+'</span>'+
+    '</div>';
+    t.modules.forEach(function(r){
+      var mod = r.module||'';
+      var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+      var submitted = r.submittedAt ? new Date(r.submittedAt.toDate()).toLocaleDateString() : '—';
+      h += '<div class="s-score-row">';
+      h += '<div class="score-module-icon">'+( icons[mod]||'📝')+'</div>';
+      h += '<div class="score-info">'+
+        '<div class="score-title">'+mod.charAt(0).toUpperCase()+mod.slice(1)+'</div>'+
+        '<div class="score-sub">Submitted '+submitted+'</div>'+
+      '</div>';
+      if(!r.released){
+        h += '<span class="pending-badge">⏳ Awaiting release</span>';
+      } else {
+        if(mod==='writing'){
+          var wb = r.writingBand||r.band||null;
+          if(wb){
+            h += '<div class="score-band-wrap">'+
+              '<div class="score-band-num" style="color:'+bandColor(wb)+'">'+parseFloat(wb).toFixed(1)+'</div>'+
+              '<div class="score-band-lbl">Band</div>'+
+            '</div>';
+          } else {
+            h += '<span class="pending-badge">Graded — band pending</span>';
+          }
+        } else {
+          var band = getBand(r.correct, mod, t.testType);
+          var raw = (r.correct||0)+'/'+(r.total||40);
+          h += '<div class="score-raw">'+raw+'<br><span style="font-size:10px">correct</span></div>';
+          if(band!==null){
+            h += '<div class="score-band-wrap" style="background:'+bandBg(band)+';border-radius:var(--r);padding:6px 10px">'+
+              '<div class="score-band-num" style="color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>'+
+              '<div class="score-band-lbl" style="color:'+bandColor(band)+'">Band</div>'+
+            '</div>';
+          }
+        }
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }).join('');
+}
+
+// ── Wire up teacher results tab ──
+var _prevTN2 = tN;
+tN = function(page, el){
+  _prevTN2(page, el);
+  if(page==='results') loadTeacherResults();
+};
+
+// ── Wire up student results on load ──
+var _prevLoadStudent2 = loadStudent;
+loadStudent = function(d){
+  _prevLoadStudent2(d);
+  // Load results after short delay
+  setTimeout(loadStudentResults, 1000);
+};
+
+// ── Also reload results after submission ──
+var _prevShowDoneScreen = showDoneScreen;
+showDoneScreen = function(mod, score, correct, total){
+  _prevShowDoneScreen(mod, score, correct, total);
+  // Reload student results in background
+  setTimeout(loadStudentResults, 2000);
+};
+
+console.log('JIC IELTS — Results system loaded ✓');
+</script>
