@@ -12629,3 +12629,404 @@ loadNotifications = function(){
 
 console.log('JIC IELTS — no-index queries loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Writing result — teacher feedback field
+// ═══════════════════════════════════════════════
+
+// Override rendTeacherResults to include feedback textarea for writing
+var _prevRendTeacherResults2 = rendTeacherResults;
+rendTeacherResults = function(results){
+  var el = document.getElementById('t-results-list');
+  if(!el) return;
+  if(!results.length){
+    el.innerHTML =
+      '<div style="text-align:center;padding:32px;color:var(--mu)">'+
+        '<div style="font-size:36px;margin-bottom:8px">📊</div>'+
+        'No results yet.'+
+      '</div>';
+    return;
+  }
+  el.innerHTML = results.map(function(r){
+    var mod = r.module||'';
+    var icons = {listening:'🎧',reading:'📖',writing:'✏️'};
+    var icon = icons[mod]||'📝';
+    var submitted = '';
+    try {
+      var dt = r.submittedAt?(r.submittedAt.toDate?r.submittedAt.toDate():new Date(r.submittedAt)):null;
+      if(dt) submitted = dt.toLocaleString();
+    } catch(e){}
+    var band = (mod==='listening'||mod==='reading') ?
+      getBand(r.correct, mod, r.testType||'Academic') : null;
+    var isWriting = mod==='writing';
+    var ini = (r.studentName||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+
+    var h = '<div class="result-card" id="rc-'+r.id+'">';
+    // Header
+    h += '<div class="result-card-hdr">'+
+      '<div style="display:flex;align-items:center;gap:10px">'+
+        '<div style="width:38px;height:38px;border-radius:50%;background:var(--bll);color:var(--bl);'+
+          'display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0">'+ini+'</div>'+
+        '<div>'+
+          '<div style="font-size:14px;font-weight:600">'+r.studentName+'</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+r.testName+' · '+icon+' '+
+            mod.charAt(0).toUpperCase()+mod.slice(1)+'</div>'+
+          '<div style="font-size:11px;color:var(--hi)">'+submitted+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:8px">'+
+        (r.released?'<span class="badge b-gr">✓ Released</span>':'<span class="badge b-am">Pending</span>')+
+      '</div>'+
+    '</div>';
+
+    h += '<div class="result-card-body">';
+
+    if(isWriting){
+      // Essays side by side
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">';
+      if(r.writingTask1){
+        h += '<div>'+
+          '<div style="font-size:12px;font-weight:600;color:var(--mu);margin-bottom:6px">'+
+            'TASK 1 · '+countWords2(r.writingTask1)+' words</div>'+
+          '<div class="writing-review-box">'+escHTMLCm(r.writingTask1)+'</div>'+
+          '</div>';
+      }
+      if(r.writingTask2){
+        h += '<div>'+
+          '<div style="font-size:12px;font-weight:600;color:var(--mu);margin-bottom:6px">'+
+            'TASK 2 · '+countWords2(r.writingTask2)+' words</div>'+
+          '<div class="writing-review-box">'+escHTMLCm(r.writingTask2)+'</div>'+
+          '</div>';
+      }
+      h += '</div>';
+
+      // Grading section
+      h += '<div style="background:var(--bg);border-radius:var(--r);padding:14px;border:1px solid var(--b)">';
+      h += '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--t)">Teacher grading</div>';
+
+      // Band score + feedback in a grid
+      h += '<div style="display:grid;grid-template-columns:180px 1fr;gap:14px;align-items:start">';
+
+      // Left — band score
+      h += '<div>'+
+        '<label class="fl" style="margin-bottom:6px">Band score</label>'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<input class="inp" type="number" id="w-grade-'+r.id+'" '+
+            'value="'+(r.writingBand||'')+'" '+
+            'min="1" max="9" step="0.5" '+
+            'placeholder="e.g. 6.5" '+
+            'style="width:90px;font-size:18px;font-weight:700;text-align:center">'+
+          '<span style="font-size:12px;color:var(--mu)">1.0 – 9.0</span>'+
+        '</div>'+
+        (r.writingBand?
+          '<div style="margin-top:8px;text-align:center;width:90px">'+
+            '<div style="font-size:22px;font-weight:800;color:'+bandColor(parseFloat(r.writingBand))+'">'+
+              parseFloat(r.writingBand).toFixed(1)+
+            '</div>'+
+            '<div style="font-size:10px;color:var(--mu)">Current band</div>'+
+          '</div>':'')+
+        '</div>';
+
+      // Right — feedback
+      h += '<div>'+
+        '<label class="fl" style="margin-bottom:6px">Teacher feedback / comments</label>'+
+        '<textarea class="inp" id="w-feedback-'+r.id+'" rows="5" '+
+          'placeholder="Write your feedback here...&#10;&#10;e.g. Good use of vocabulary. Work on task response for Task 2. Your argument needs more supporting examples. Consider varying your sentence structures more.&#10;&#10;Task 1: Clear overview but missing key trends.&#10;Task 2: Good thesis but conclusion needs strengthening." '+
+          'style="font-size:13px;line-height:1.6;resize:vertical">'+
+          escHTMLCm(r.teacherFeedback||'')+
+        '</textarea>'+
+        '<div style="font-size:11px;color:var(--mu);margin-top:4px">'+
+          'This feedback will be visible to the student when you release the result.'+
+        '</div>'+
+        '</div>';
+
+      h += '</div>'; // end grid
+
+      // Release button
+      h += '<div style="display:flex;justify-content:flex-end;margin-top:12px">'+
+        '<button class="btn '+(r.released?'':'btn-p')+'" '+
+          'style="'+(r.released?'background:var(--grl);color:var(--gr);border-color:var(--gr)':'')+'" '+
+          'onclick="releaseWritingResult(\''+r.id+'\')">'+(r.released?'✓ Update result':'📤 Grade & release to student')+
+        '</button>'+
+      '</div>';
+      h += '</div>'; // end grading section
+
+    } else {
+      // Listening / Reading
+      h += '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">';
+      if(band!==null){
+        h += '<div class="band-badge" style="background:'+bandBg(band)+';color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>';
+      }
+      h += '<div style="flex:1">'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:4px">Raw score</div>'+
+        '<div style="font-size:28px;font-weight:700">'+(r.correct||0)+' / '+(r.total||40)+'</div>'+
+        (band!==null?'<div style="font-size:13px;color:'+bandColor(band)+';font-weight:600;margin-top:2px">'+
+          'Band '+band.toFixed(1)+' ('+(r.testType||'Academic')+')</div>':'')+
+      '</div>';
+      h += '<button class="btn '+(r.released?'':'btn-p')+'" '+
+        'style="'+(r.released?'background:var(--grl);color:var(--gr);border-color:var(--gr)':'')+'" '+
+        'onclick="releaseResult(\''+r.id+'\',\''+mod+'\')">'+(r.released?'✓ Released':'📤 Release to student')+
+      '</button>';
+      h += '</div>';
+    }
+
+    h += '</div></div>';
+    return h;
+  }).join('');
+};
+
+// New function — release writing result with feedback
+function releaseWritingResult(resultId){
+  var gradeEl = document.getElementById('w-grade-'+resultId);
+  var feedbackEl = document.getElementById('w-feedback-'+resultId);
+  var band = gradeEl ? parseFloat(gradeEl.value) : null;
+  if(!band||isNaN(band)||band<1||band>9){
+    showToast('Please enter a valid band score (1.0–9.0).','err');
+    return;
+  }
+  var feedback = feedbackEl ? feedbackEl.value.trim() : '';
+  var data = {
+    released: true,
+    writingBand: band,
+    band: band,
+    teacherFeedback: feedback,
+    releasedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('results').doc(resultId).update(data).then(function(){
+    showToast('✓ Writing result released to student!');
+    // Update local cache
+    var r = (window._allResults||[]).find(function(x){return x.id===resultId;});
+    if(r){
+      r.released=true;
+      r.writingBand=band;
+      r.teacherFeedback=feedback;
+    }
+    filterResults();
+    // Send notification to student
+    if(r&&r.studentId){
+      db.collection('notifications').add({
+        userId: r.studentId,
+        teacherId: CU.uid,
+        type: 'result_released',
+        testId: r.testId,
+        testName: r.testName||'Test',
+        module: 'writing',
+        read: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(function(){});
+    }
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// Show teacher feedback on student results
+var _prevRendStudentResults = rendStudentResults;
+rendStudentResults = function(results){
+  var el = document.getElementById('s-results');
+  if(!el) return;
+  if(!results.length){
+    el.innerHTML='<div style="color:var(--mu);font-size:13px;padding:12px 0">No completed tests yet.</div>';
+    return;
+  }
+  // Deduplicate
+  var seen={};
+  var deduped=[];
+  results.sort(function(a,b){
+    var ta=a.submittedAt?(a.submittedAt.toDate?a.submittedAt.toDate().getTime():0):0;
+    var tb=b.submittedAt?(b.submittedAt.toDate?b.submittedAt.toDate().getTime():0):0;
+    return tb-ta;
+  });
+  results.forEach(function(r){
+    var key=(r.testId||'')+'_'+(r.module||'');
+    if(!seen[key]){seen[key]=true;deduped.push(r);}
+  });
+  // Group by test
+  var byTest={};
+  deduped.forEach(function(r){
+    var tid=r.testId||'unknown';
+    if(!byTest[tid]) byTest[tid]={testName:r.testName||'Test',testType:r.testType||'Academic',modules:[]};
+    byTest[tid].modules.push(r);
+  });
+  el.innerHTML=Object.keys(byTest).map(function(tid){
+    var t=byTest[tid];
+    var h='<div class="s-result-card">';
+    h+='<div class="s-result-hdr">'+
+      '<div style="font-size:14px;font-weight:600">'+t.testName+'</div>'+
+      '<span style="font-size:12px;color:var(--mu)">'+t.testType+'</span>'+
+    '</div>';
+    var modOrder={listening:0,reading:1,writing:2};
+    t.modules.sort(function(a,b){return (modOrder[a.module]||0)-(modOrder[b.module]||0);});
+    t.modules.forEach(function(r){
+      var mod=r.module||'';
+      var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+      var submitted='';
+      try{var dt=r.submittedAt?(r.submittedAt.toDate?r.submittedAt.toDate():new Date(r.submittedAt)):null;if(dt)submitted=dt.toLocaleDateString();}catch(e){}
+      h+='<div class="s-score-row">';
+      h+='<div class="score-module-icon">'+(icons[mod]||'📝')+'</div>';
+      h+='<div class="score-info">'+
+        '<div class="score-title">'+mod.charAt(0).toUpperCase()+mod.slice(1)+'</div>'+
+        '<div class="score-sub">'+(submitted?'Submitted '+submitted:'')+'</div>'+
+      '</div>';
+      if(!r.released){
+        h+='<span class="pending-badge">⏳ Awaiting release</span>';
+      } else {
+        if(mod==='writing'){
+          var wb=r.writingBand||r.band||null;
+          h+='<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">';
+          if(wb){
+            h+='<div class="score-band-wrap" style="background:'+bandBg(parseFloat(wb))+';border-radius:var(--r);padding:6px 12px">'+
+              '<div class="score-band-num" style="color:'+bandColor(parseFloat(wb))+'">'+parseFloat(wb).toFixed(1)+'</div>'+
+              '<div class="score-band-lbl" style="color:'+bandColor(parseFloat(wb))+'">Band</div>'+
+            '</div>';
+          }
+          h+='</div>';
+          // Show feedback if available
+          if(r.teacherFeedback){
+            h+='</div>'; // close s-score-row
+            h+='<div style="padding:12px 16px;background:var(--bll);border-top:1px solid var(--b)">'+
+              '<div style="font-size:12px;font-weight:600;color:var(--bl);margin-bottom:6px">💬 Teacher feedback</div>'+
+              '<div style="font-size:13px;line-height:1.7;white-space:pre-wrap;color:var(--t)">'+escHTMLCm(r.teacherFeedback)+'</div>'+
+            '</div>';
+            return; // skip closing s-score-row again
+          }
+        } else {
+          var band=getBand(r.correct,mod,t.testType);
+          var raw=(r.correct||0)+'/'+(r.total||40);
+          h+='<div style="display:flex;align-items:center;gap:10px">'+
+            '<div style="text-align:center">'+
+              '<div style="font-size:18px;font-weight:700">'+raw+'</div>'+
+              '<div style="font-size:10px;color:var(--mu)">correct</div>'+
+            '</div>';
+          if(band!==null){
+            h+='<div class="score-band-wrap" style="background:'+bandBg(band)+';border-radius:var(--r);padding:6px 12px">'+
+              '<div class="score-band-num" style="color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>'+
+              '<div class="score-band-lbl" style="color:'+bandColor(band)+'">Band</div>'+
+            '</div>';
+          }
+          h+='</div>';
+        }
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+    return h;
+  }).join('');
+};
+
+console.log('JIC IELTS — writing feedback field loaded ✓');
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Listening and Reading always out of 40
+// ═══════════════════════════════════════════════
+
+// Override submitTest to always use 40 as total
+var _prevSubmitTest2 = submitTest;
+submitTest = function(){
+  var mod = testState.module;
+  var tc = testState.testContent;
+  var score = null, correct = 0, total = 40; // always 40
+
+  if(mod==='listening'||mod==='reading'){
+    var groups = [];
+    if(mod==='listening'){
+      for(var s=1;s<=4;s++){
+        var sec=tc.listening&&(tc.listening.sections[s]||tc.listening.sections[String(s)]);
+        (sec&&sec.groups||[]).forEach(function(g){ groups.push(g); });
+      }
+    } else {
+      for(var p=1;p<=3;p++){
+        var pas=tc.reading&&(tc.reading.passages[p]||tc.reading.passages[String(p)]);
+        (pas&&pas.groups||[]).forEach(function(g){ groups.push(g); });
+      }
+    }
+    // Count correct answers
+    groups.forEach(function(g){
+      (g.questions||[]).forEach(function(q){
+        if(!q.answer) return;
+        var studentAns = String(testState.answers[q.num]||'').trim();
+        if(checkAnswer(studentAns, q.answer)) correct++;
+      });
+    });
+    // Score is always out of 40
+    score = correct;
+  }
+
+  var result = {
+    studentId: CU.uid,
+    studentName: (document.getElementById('s-name')||{}).textContent||'Student',
+    testId: testState.testId,
+    testName: testState.testData&&testState.testData.name||'Test',
+    testType: testState.testData&&testState.testData.type||'Academic',
+    teacherId: testState.testData&&testState.testData.teacherId||
+               (testState.assignment&&testState.assignment.teacherId)||'',
+    module: mod,
+    answers: testState.answers,
+    score: score,
+    correct: correct,
+    total: 40, // always 40
+    writingTask1: testState.answers['w1']||'',
+    writingTask2: testState.answers['w2']||'',
+    released: false,
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  // Check for existing result to avoid duplicates
+  db.collection('results')
+    .where('studentId','==',CU.uid)
+    .where('testId','==',testState.testId)
+    .where('module','==',mod)
+    .get()
+    .then(function(snap){
+      var pr;
+      if(!snap.empty){
+        pr = db.collection('results').doc(snap.docs[0].id).update(result);
+      } else {
+        pr = db.collection('results').add(result);
+      }
+      return pr;
+    })
+    .then(function(){
+      if(testState.allowPause){
+        db.collection('test_progress')
+          .doc(CU.uid+'_'+testState.testId+'_'+mod)
+          .delete().catch(function(){});
+      }
+      if(result.teacherId){
+        db.collection('notifications').add({
+          teacherId: result.teacherId,
+          type: 'completion',
+          studentId: CU.uid,
+          studentName: result.studentName,
+          testId: testState.testId,
+          testName: result.testName,
+          module: mod,
+          score: correct+'/40',
+          read: false,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(function(){});
+      }
+      showDoneScreen(mod, score, correct, 40);
+    })
+    .catch(function(e){ showToast('Error submitting: '+e.message,'err'); });
+};
+
+// Also fix the display — always show /40
+var _prevRendTeacherResults3 = rendTeacherResults;
+rendTeacherResults = function(results){
+  // Ensure total is always 40 for listening/reading
+  results.forEach(function(r){
+    if(r.module==='listening'||r.module==='reading') r.total=40;
+  });
+  _prevRendTeacherResults3(results);
+};
+
+var _prevRendStudentResults2 = rendStudentResults;
+rendStudentResults = function(results){
+  results.forEach(function(r){
+    if(r.module==='listening'||r.module==='reading') r.total=40;
+  });
+  _prevRendStudentResults2(results);
+};
+
+console.log('JIC IELTS — score always out of 40 loaded ✓');
+</script>
