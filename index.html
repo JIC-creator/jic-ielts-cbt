@@ -9195,3 +9195,639 @@ enterClassroom = function(testId, testData, testContent, userRole){
 
 console.log('JIC IELTS — Reading classroom highlights (Location + Answer) loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  Map/Diagram Labelling — Grid matching layout
+//  Left: image, Right: Q x Letter grid
+// ═══════════════════════════════════════════════
+
+var mapGridCSS = document.createElement('style');
+mapGridCSS.textContent = `
+/* Map grid layout */
+.map-grid-wrap {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.map-img-side {
+  flex: 1;
+  min-width: 260px;
+  max-width: 480px;
+}
+.map-img-side img {
+  width: 100%;
+  border-radius: var(--r);
+  border: 1px solid var(--b);
+  cursor: zoom-in;
+}
+.map-grid-side {
+  flex: 1;
+  min-width: 280px;
+  overflow-x: auto;
+}
+.map-grid-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.map-grid-table th {
+  background: var(--bg);
+  padding: 8px 10px;
+  border: 1px solid var(--b);
+  text-align: center;
+  font-weight: 700;
+  color: var(--bl);
+  min-width: 36px;
+}
+.map-grid-table th.q-header {
+  text-align: left;
+  min-width: 140px;
+  color: var(--mu);
+  font-weight: 500;
+}
+.map-grid-table td {
+  border: 1px solid var(--b);
+  padding: 6px 8px;
+  text-align: center;
+  vertical-align: middle;
+}
+.map-grid-table td.q-label {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.map-grid-table td.q-label .q-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--t);
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 12px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.map-grid-table tr:hover td { background: var(--bg); }
+.map-grid-table tr.selected-row td { background: var(--bll); }
+.map-radio {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--bl);
+  cursor: pointer;
+}
+/* Editor map grid preview */
+.map-letters-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.map-letter-tag {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bll);
+  color: var(--bl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1.5px solid var(--blm);
+}
+`;
+document.head.appendChild(mapGridCSS);
+
+// ── Override openQG to add map grid settings for diagram type ──
+var _prevOpenQG4 = openQG;
+openQG = function(mod, sp){
+  _prevOpenQG4(mod, sp);
+  setTimeout(function(){
+    var imgDiv = document.getElementById('qg-img');
+    if(!imgDiv || document.getElementById('qg-map-settings')) return;
+    // Add map grid settings after image upload
+    var mapDiv = document.createElement('div');
+    mapDiv.id = 'qg-map-settings';
+    mapDiv.style.display = 'none';
+    mapDiv.innerHTML =
+      '<div style="background:var(--bll);border-radius:var(--r);padding:12px;margin-bottom:14px">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#0C447C">Map/Diagram grid settings</div>'+
+      '<div class="fg">'+
+      '<div class="fr" style="margin:0"><label class="fl">Map letters (e.g. A-I)</label>'+
+      '<input class="inp" id="map-letters" placeholder="e.g. A,B,C,D,E,F,G,H,I" oninput="previewMapLetters()"></div>'+
+      '</div>'+
+      '<div id="map-letters-preview" style="margin-top:8px"></div>'+
+      '<div style="font-size:11px;color:var(--mu);margin-top:6px">Type the letters exactly as they appear on the map, separated by commas.</div>'+
+      '</div>';
+    imgDiv.parentNode.insertBefore(mapDiv, imgDiv.nextSibling);
+    // Show map settings when diagram is selected
+    var sel = document.getElementById('qg-ty');
+    if(sel && sel.value==='diagram') mapDiv.style.display='block';
+    // Watch type change
+    if(sel) sel.addEventListener('change', function(){
+      mapDiv.style.display = this.value==='diagram'?'block':'none';
+    });
+  }, 150);
+};
+
+function previewMapLetters(){
+  var inp = document.getElementById('map-letters');
+  var prev = document.getElementById('map-letters-preview');
+  if(!inp||!prev) return;
+  var letters = inp.value.split(',').map(function(l){return l.trim();}).filter(Boolean);
+  prev.innerHTML = '<div class="map-letters-wrap">'+
+    letters.map(function(l){
+      return '<div class="map-letter-tag">'+l+'</div>';
+    }).join('')+'</div>'+
+    '<div style="font-size:11px;color:var(--mu)">'+letters.length+' location(s) on map</div>';
+}
+
+// ── Override saveQG to save map letters ──
+var _prevSaveQG6 = saveQG;
+saveQG = function(){
+  var ty = document.getElementById('qg-ty').value;
+  if(ty !== 'diagram'){ _prevSaveQG6(); return; }
+  var fr = parseInt(document.getElementById('qg-fr').value)||1;
+  var to = parseInt(document.getElementById('qg-to').value)||fr;
+  var ins = document.getElementById('qg-in').value.trim();
+  var wl = document.getElementById('qg-wl').value;
+  var lettersInp = document.getElementById('map-letters');
+  var letters = lettersInp ?
+    lettersInp.value.split(',').map(function(l){return l.trim();}).filter(Boolean) :
+    ['A','B','C','D','E','F','G','H','I'];
+  var g = {
+    type:'diagram', fromQ:fr, toQ:to,
+    instruction:ins, wordLimit:wl,
+    questions:[], wordBox:[], headingsList:[],
+    matchOptions:[], tableData:null,
+    image:qgImg||null,
+    summaryText:null, summaryAnswers:[],
+    mapLetters:letters
+  };
+  var tc = getTC();
+  if(qgCtx.mod==='listening') tc.listening.sections[qgCtx.sp].groups.push(g);
+  else tc.reading.passages[qgCtx.sp].groups.push(g);
+  closeM('qg');
+  showToast('Map/Diagram group added!');
+  renderMod(curTOwner==='admin'?'a':'t', qgCtx.mod);
+};
+
+// ── Override openQ for diagram — add question label + correct letter ──
+var _prevOpenQ4 = openQ;
+openQ = function(mod, sp, gi){
+  qCtx = {mod:mod, sp:sp, gi:gi};
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  if(g.type !== 'diagram'){ _prevOpenQ4(mod, sp, gi); return; }
+  var qn = g.fromQ + g.questions.length;
+  var letters = g.mapLetters||['A','B','C','D','E','F','G','H','I'];
+  document.getElementById('q-title').textContent = 'Add Q'+qn+' — Map/Diagram Labelling';
+  var h = '<input type="hidden" id="qn" value="'+qn+'">';
+  if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:180px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:12px;cursor:zoom-in" onclick="openLB(this.src)">';
+  }
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+
+    letters.map(function(l){
+      return '<div class="map-letter-tag">'+l+'</div>';
+    }).join('')+'</div>';
+  h += '<div class="fr"><label class="fl">Question label (e.g. Exhibition, Baths...)</label>'+
+    '<input class="inp" id="qt" placeholder="e.g. Exhibition"></div>';
+  h += '<div class="fr"><label class="fl">Correct map letter</label>'+
+    '<select class="inp" id="qa">'+
+    letters.map(function(l){ return '<option value="'+l+'">'+l+'</option>'; }).join('')+
+    '</select></div>';
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = saveQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Save question';
+  openM('q');
+};
+
+// ── Override buildPrevQBlock for diagram — render grid ──
+var _prevBuildPrevQBlock5 = buildPrevQBlock;
+buildPrevQBlock = function(g, getQNum){
+  if(g.type !== 'diagram') return _prevBuildPrevQBlock5(g, getQNum);
+  var letters = g.mapLetters||['A','B','C','D','E','F','G','H','I'];
+  var qs = g.questions.length ? g.questions : mkDummyQs(g.fromQ, g.toQ, 'diagram');
+  var h = '<div class="prev-qblock">';
+  h += '<div class="prev-qtl">Q'+g.fromQ+'–Q'+g.toQ+' · Map / Plan / Diagram Labelling</div>';
+  if(g.instruction) h += '<div class="prev-inst">'+renderBold(g.instruction)+'</div>';
+  // Map grid layout
+  h += '<div class="map-grid-wrap">';
+  // Left — image
+  if(g.image){
+    h += '<div class="map-img-side">'+
+      '<img src="'+g.image+'" onclick="openLB(this.src)" title="Click to enlarge">'+
+      '<div style="font-size:11px;color:var(--mu);margin-top:4px;text-align:center">Click image to enlarge</div>'+
+      '</div>';
+  }
+  // Right — grid table
+  h += '<div class="map-grid-side"><table class="map-grid-table">';
+  // Header row — empty cell + letter columns
+  h += '<tr><th class="q-header">Question</th>'+
+    letters.map(function(l){ return '<th>'+l+'</th>'; }).join('')+'</tr>';
+  // Question rows
+  qs.forEach(function(q){
+    var qn = q.num || getQNum();
+    var groupId = 'mapq-'+qn;
+    h += '<tr id="maprow-'+qn+'">'+
+      '<td class="q-label">'+
+        '<span class="q-num">'+qn+'</span>'+
+        renderBold(q.text||'Question '+qn)+
+      '</td>'+
+      letters.map(function(l){
+        return '<td>'+
+          '<input type="radio" class="map-radio" name="'+groupId+'" value="'+l+'" '+
+          'onchange="prevAnswers['+qn+']=this.value;highlightMapRow('+qn+')">'+
+          '</td>';
+      }).join('')+
+      '</tr>';
+  });
+  h += '</table></div>';
+  h += '</div>'; // end map-grid-wrap
+  h += '</div>';
+  return h;
+};
+
+function highlightMapRow(qn){
+  // Subtle highlight on selected row
+  var row = document.getElementById('maprow-'+qn);
+  if(row) row.classList.add('selected-row');
+}
+
+// ── rendQGCard update for diagram — show map letters ──
+var _prevRendQGCard4 = rendQGCard;
+rendQGCard = function(g, gi, mod, sp){
+  if(g.type !== 'diagram') return _prevRendQGCard4(g, gi, mod, sp);
+  var letters = g.mapLetters||[];
+  var tl = 'Map / Plan / Diagram Labelling';
+  var h = '<div class="qb" id="qg-card-'+gi+'" draggable="true" '+
+    'ondragstart="qgDragStart(event,'+gi+',\''+mod+'\','+sp+')" '+
+    'ondragover="qgDragOver(event,'+gi+')" '+
+    'ondragleave="qgDragLeave(event,'+gi+')" '+
+    'ondrop="qgDrop(event,'+gi+',\''+mod+'\','+sp+')">';
+  h += '<div class="qb-hdr" onclick="togQB(this)">'+
+    '<span class="qb-drag-handle" onclick="event.stopPropagation()">⠿</span>'+
+    '<div class="qb-num">'+(gi+1)+'</div>'+
+    '<div class="qb-title">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>'+
+    '<span class="qtb">'+g.questions.length+' question(s)</span>'+
+    '<div style="margin-left:auto;display:flex;gap:4px;align-items:center">'+
+    '<div class="qb-reorder-btns" onclick="event.stopPropagation()">'+
+    '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',-1)">▲</button>'+
+    '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',1)">▼</button>'+
+    '</div>'+
+    '<button class="btn btn-sm" onclick="event.stopPropagation();openEditQG(\''+mod+'\','+sp+','+gi+')">✏️ Edit</button>'+
+    '<button class="btn btn-sm btn-d" onclick="event.stopPropagation();rmQG(\''+mod+'\','+sp+','+gi+')">🗑</button>'+
+    '</div></div>';
+  h += '<div class="qb-body">';
+  if(g.instruction) h += '<div style="font-size:12px;color:var(--mu);margin-bottom:8px">'+renderBold(g.instruction)+'</div>';
+  // Show image thumbnail
+  if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:160px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:8px;cursor:zoom-in" onclick="openLB(this.src)">';
+  }
+  // Show map letters
+  if(letters.length){
+    h += '<div style="margin-bottom:8px"><div style="font-size:12px;color:var(--mu);margin-bottom:4px">Map locations:</div>'+
+      '<div class="map-letters-wrap">'+
+      letters.map(function(l){ return '<div class="map-letter-tag">'+l+'</div>'; }).join('')+
+      '</div></div>';
+  }
+  // Questions with answers
+  h += '<div>';
+  g.questions.forEach(function(q, qi){
+    h += '<div class="q-item"><div class="q-item-h">'+
+      '<div class="q-item-num">'+q.num+'</div>'+
+      '<div style="flex:1;font-size:13px">'+renderBold(q.text||'Question '+q.num)+
+        (q.answer?'<span style="color:var(--gr);margin-left:8px;font-size:11px">✓ '+q.answer+'</span>':'')+
+      '</div>'+
+      '<button class="btn btn-sm" style="margin-right:4px" onclick="openEditQ(\''+mod+'\','+sp+','+gi+','+qi+')">✏️</button>'+
+      '<button class="btn btn-sm btn-d" onclick="rmQ(\''+mod+'\','+sp+','+gi+','+qi+')">🗑</button>'+
+      '</div></div>';
+  });
+  h += '</div>';
+  h += '<button class="btn btn-p btn-sm" style="margin-top:8px" onclick="openQ(\''+mod+'\','+sp+','+gi+')">+ Add question</button>';
+  h += '</div></div>';
+  return h;
+};
+
+// ── openEditQ for diagram — pre-fill label and letter ──
+var _prevOpenEditQ2 = openEditQ;
+openEditQ = function(mod, sp, gi, qi){
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  if(g.type !== 'diagram'){ _prevOpenEditQ2(mod, sp, gi, qi); return; }
+  editQCtx = {mod:mod, sp:sp, gi:gi, qi:qi};
+  var q = g.questions[qi];
+  var letters = g.mapLetters||['A','B','C','D','E','F','G','H','I'];
+  document.getElementById('q-title').textContent = 'Edit Q'+q.num+' — Map/Diagram Labelling';
+  var h = '<input type="hidden" id="qn" value="'+q.num+'">';
+  if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:150px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:12px;cursor:zoom-in" onclick="openLB(this.src)">';
+  }
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+
+    letters.map(function(l){ return '<div class="map-letter-tag">'+l+'</div>'; }).join('')+'</div>';
+  h += '<div class="fr"><label class="fl">Question label</label>'+
+    '<input class="inp" id="qt" value="'+(q.text||'')+'" placeholder="e.g. Exhibition"></div>';
+  h += '<div class="fr"><label class="fl">Correct map letter</label>'+
+    '<select class="inp" id="qa">'+
+    letters.map(function(l){
+      return '<option value="'+l+'"'+(l===q.answer?' selected':'')+'>'+l+'</option>';
+    }).join('')+'</select></div>';
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = updateQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Update question';
+  openM('q');
+};
+
+console.log('JIC IELTS — Map/Diagram grid layout loaded ✓');
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  Flow-chart — Image upload + fill-in answers below
+//  Supports simple Q1: ___ and full sentence with [Q1]
+// ═══════════════════════════════════════════════
+
+// Override QTYPES — update flowchart label to be clearer
+QTYPES.forEach(function(t){
+  if(t.v==='flowchart') t.l='Flow-chart Completion';
+});
+
+// Override onQGTy to show image upload for flowchart (not the canvas builder)
+var _prevOnQGTy4 = onQGTy;
+onQGTy = function(){
+  var t = document.getElementById('qg-ty'); if(!t) return;
+  var v = t.value;
+  // For flowchart — show image upload only, not canvas builder
+  var isTbl = v==='table';
+  var isFlow = v==='flowchart';
+  var isDiag = v==='diagram';
+  var isWB = v==='summary2';
+  var isHdg = v==='mheading';
+  var isMO = v==='matching'||v==='mfeature'||v==='sendend';
+  var isSummary = v==='summary1'||v==='summary2';
+  var isMulti = v==='mcq2'||v==='mcq2r';
+
+  // Show/hide sections
+  var els = {
+    'qg-tbl': isTbl,
+    'qg-tbl-subtype': isTbl,
+    'qg-flowchart': false, // hide old canvas builder always
+    'qg-img': isDiag||isFlow, // show image for both diagram AND flowchart
+    'qg-wb': isWB,
+    'qg-hdgs': isHdg,
+    'qg-mopts': isMO,
+    'qg-summary-para': isSummary,
+    'qg-mcq-multi': isMulti,
+    'qg-q-note': (!isSummary&&!isTbl&&!isFlow&&!isDiag),
+    'qg-map-settings': isDiag, // map letters only for diagram
+    'qg-flow-note': isFlow // flow-chart instruction note
+  };
+  Object.keys(els).forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.style.display = els[id]?'block':'none';
+  });
+
+  // Update image upload label based on type
+  var imgLabel = document.getElementById('qg-img-label');
+  if(imgLabel){
+    if(isFlow) imgLabel.textContent = '🗺 Click to upload flow-chart image';
+    else imgLabel.textContent = '🗺 Click to upload map/diagram image';
+  }
+};
+
+// Inject flowchart note into openQG
+var _prevOpenQG5 = openQG;
+openQG = function(mod, sp){
+  _prevOpenQG5(mod, sp);
+  setTimeout(function(){
+    var imgDiv = document.getElementById('qg-img');
+    if(!imgDiv) return;
+    // Update image label span ID
+    var lbl = imgDiv.querySelector('span');
+    if(lbl) lbl.id = 'qg-img-label';
+    // Add flowchart note
+    if(!document.getElementById('qg-flow-note')){
+      var noteDiv = document.createElement('div');
+      noteDiv.id = 'qg-flow-note';
+      noteDiv.style.display = 'none';
+      noteDiv.innerHTML =
+        '<div style="background:var(--grl);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:13px;color:#085041">'+
+        '📋 <strong>Flow-chart Completion</strong><br>'+
+        'Upload the flow-chart image above. Then use <strong>"+ Add question"</strong> to add each blank.<br>'+
+        'Each question can be:<br>'+
+        '• <strong>Simple:</strong> just leave the sentence blank — shows as <em>Q1: ___</em><br>'+
+        '• <strong>Full sentence:</strong> type the sentence and use <strong>[Q1]</strong> where the blank goes'+
+        '</div>';
+      imgDiv.parentNode.insertBefore(noteDiv, imgDiv.nextSibling);
+    }
+    // Re-run type check
+    var sel = document.getElementById('qg-ty');
+    if(sel) onQGTy();
+  }, 150);
+};
+
+// Override saveQG for flowchart — image based, no canvas
+var _prevSaveQG7 = saveQG;
+saveQG = function(){
+  var ty = document.getElementById('qg-ty').value;
+  if(ty !== 'flowchart'){ _prevSaveQG7(); return; }
+  var fr = parseInt(document.getElementById('qg-fr').value)||1;
+  var to = parseInt(document.getElementById('qg-to').value)||fr;
+  var ins = document.getElementById('qg-in').value.trim();
+  var wl = document.getElementById('qg-wl').value;
+  var g = {
+    type:'flowchart', fromQ:fr, toQ:to,
+    instruction:ins, wordLimit:wl,
+    questions:[], wordBox:[], headingsList:[],
+    matchOptions:[], tableData:null,
+    image:qgImg||null, // flow-chart image
+    summaryText:null, summaryAnswers:[],
+    fcNodes:[], fcArrows:[] // empty — not using canvas builder
+  };
+  var tc = getTC();
+  if(qgCtx.mod==='listening') tc.listening.sections[qgCtx.sp].groups.push(g);
+  else tc.reading.passages[qgCtx.sp].groups.push(g);
+  closeM('qg');
+  showToast('Flow-chart group added!');
+  renderMod(curTOwner==='admin'?'a':'t', qgCtx.mod);
+};
+
+// Override openQ for flowchart — sentence or simple input
+var _prevOpenQ5 = openQ;
+openQ = function(mod, sp, gi){
+  qCtx = {mod:mod, sp:sp, gi:gi};
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  if(g.type !== 'flowchart'){ _prevOpenQ5(mod, sp, gi); return; }
+  var qn = g.fromQ + g.questions.length;
+  document.getElementById('q-title').textContent = 'Add Q'+qn+' — Flow-chart Completion';
+  var h = '<input type="hidden" id="qn" value="'+qn+'">';
+  // Show image thumbnail
+  if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:180px;border-radius:var(--r);'+
+      'border:1px solid var(--b);margin-bottom:12px;cursor:zoom-in" onclick="openLB(this.src)">';
+  }
+  h += '<div style="background:var(--bg);border-radius:var(--r);padding:10px;margin-bottom:14px;font-size:12px;color:var(--mu)">'+
+    '💡 <strong>Simple input:</strong> leave the sentence blank → shows as <em>Q'+qn+': ___</em><br>'+
+    '💡 <strong>Full sentence:</strong> type sentence with <strong>[Q'+qn+']</strong> for the blank → shows inline</div>';
+  h += '<div class="fr"><label class="fl">Sentence / context (optional)</label>'+
+    '<textarea class="inp" id="qt" rows="3" placeholder="Leave empty for simple Q'+qn+': ___ OR type a sentence with [Q'+qn+'] where the blank goes&#10;e.g. The process starts with [Q'+qn+'] which then leads to..."></textarea></div>';
+  h += '<div class="fr"><label class="fl">Correct answer</label>'+
+    '<input class="inp" id="qa" placeholder="Exact answer (use parentheses for optional words, e.g. water (treatment))"></div>';
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = saveQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Save question';
+  openM('q');
+};
+
+// Override openEditQ for flowchart
+var _prevOpenEditQ3 = openEditQ;
+openEditQ = function(mod, sp, gi, qi){
+  var tc = getTC();
+  var g = mod==='listening' ?
+    tc.listening.sections[sp].groups[gi] :
+    tc.reading.passages[sp].groups[gi];
+  if(g.type !== 'flowchart'){ _prevOpenEditQ3(mod, sp, gi, qi); return; }
+  editQCtx = {mod:mod, sp:sp, gi:gi, qi:qi};
+  var q = g.questions[qi];
+  document.getElementById('q-title').textContent = 'Edit Q'+q.num+' — Flow-chart Completion';
+  var h = '<input type="hidden" id="qn" value="'+q.num+'">';
+  if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:150px;border-radius:var(--r);'+
+      'border:1px solid var(--b);margin-bottom:12px;cursor:zoom-in" onclick="openLB(this.src)">';
+  }
+  h += '<div style="background:var(--bg);border-radius:var(--r);padding:10px;margin-bottom:14px;font-size:12px;color:var(--mu)">'+
+    '💡 Leave sentence empty for simple <em>Q'+q.num+': ___</em> or use <strong>[Q'+q.num+']</strong> for inline blank.</div>';
+  h += '<div class="fr"><label class="fl">Sentence / context (optional)</label>'+
+    '<textarea class="inp" id="qt" rows="3">'+( q.text||'')+'</textarea></div>';
+  h += '<div class="fr"><label class="fl">Correct answer</label>'+
+    '<input class="inp" id="qa" value="'+(q.answer||'')+'" placeholder="Correct answer..."></div>';
+  document.getElementById('q-body').innerHTML = h;
+  document.querySelector('#mo-q .mf .btn-p').onclick = updateQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent = 'Update question';
+  openM('q');
+};
+
+// Override buildPrevQBlock for flowchart — image top, questions below
+var _prevBuildPrevQBlock6 = buildPrevQBlock;
+buildPrevQBlock = function(g, getQNum){
+  if(g.type !== 'flowchart') return _prevBuildPrevQBlock6(g, getQNum);
+  var qs = g.questions.length ? g.questions : mkDummyQs(g.fromQ, g.toQ, 'flowchart');
+  var h = '<div class="prev-qblock">';
+  h += '<div class="prev-qtl">Q'+g.fromQ+'–Q'+g.toQ+' · Flow-chart Completion</div>';
+  if(g.instruction) h += '<div class="prev-inst">'+renderBold(g.instruction)+(g.wordLimit?' <strong>'+g.wordLimit+'</strong>':'')+'</div>';
+  // Image on top — full width
+  if(g.image){
+    h += '<div style="margin-bottom:16px">'+
+      '<img src="'+g.image+'" '+
+      'style="max-width:100%;border-radius:var(--r);border:1px solid var(--b);cursor:zoom-in;display:block" '+
+      'onclick="openLB(this.src)" title="Click to enlarge">'+
+      '<div style="font-size:11px;color:var(--mu);margin-top:4px;text-align:center">Click image to enlarge</div>'+
+      '</div>';
+  }
+  // Questions below image
+  h += '<div style="border-top:1px solid var(--b);padding-top:14px">';
+  qs.forEach(function(q){
+    var qn = q.num || getQNum();
+    var hasText = q.text && q.text.trim();
+    var hasMarker = hasText && /\[Q\d+\]/i.test(q.text);
+    h += '<div style="margin-bottom:14px">';
+    if(hasMarker){
+      // Full sentence with inline blank
+      var stemHtml = renderBold(q.text).replace(/\[Q(\d+)\]/gi, function(m, num){
+        var n = parseInt(num);
+        return '<span style="font-size:11px;font-weight:700;color:var(--bl);margin-right:2px">('+n+')</span>'+
+          '<input class="prev-fb" type="text" placeholder="..." '+
+          'oninput="prevAnswers['+n+']=this.value" '+
+          'style="min-width:120px;max-width:180px">';
+      });
+      h += '<div style="font-size:13px;line-height:2.2">'+stemHtml+'</div>';
+    } else if(hasText){
+      // Has context text but no [Qn] marker — show text then simple input
+      h += '<div class="prev-qn">Question '+qn+'</div>'+
+        '<div style="font-size:13px;margin-bottom:6px;line-height:1.6;color:var(--mu)">'+renderBold(q.text)+'</div>'+
+        '<input class="prev-inp" type="text" placeholder="Your answer..." '+
+        'oninput="prevAnswers['+qn+']=this.value">';
+    } else {
+      // Simple Q1: ___ style
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0">'+
+        '<div style="display:inline-flex;align-items:center;justify-content:center;'+
+        'width:28px;height:28px;border:2px solid var(--t);border-radius:4px;'+
+        'font-weight:700;font-size:13px;flex-shrink:0">'+qn+'</div>'+
+        '<input class="prev-inp" type="text" placeholder="Your answer..." '+
+        'style="flex:1;max-width:280px" '+
+        'oninput="prevAnswers['+qn+']=this.value">'+
+        '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div>';
+  h += '</div>';
+  return h;
+};
+
+// Override rendQGCard for flowchart — show image + questions
+var _prevRendQGCard5 = rendQGCard;
+rendQGCard = function(g, gi, mod, sp){
+  if(g.type !== 'flowchart') return _prevRendQGCard5(g, gi, mod, sp);
+  var h = '<div class="qb" id="qg-card-'+gi+'" draggable="true" '+
+    'ondragstart="qgDragStart(event,'+gi+',\''+mod+'\','+sp+')" '+
+    'ondragover="qgDragOver(event,'+gi+')" '+
+    'ondragleave="qgDragLeave(event,'+gi+')" '+
+    'ondrop="qgDrop(event,'+gi+',\''+mod+'\','+sp+')">';
+  h += '<div class="qb-hdr" onclick="togQB(this)">'+
+    '<span class="qb-drag-handle" onclick="event.stopPropagation()">⠿</span>'+
+    '<div class="qb-num">'+(gi+1)+'</div>'+
+    '<div class="qb-title">Q'+g.fromQ+'–Q'+g.toQ+' · Flow-chart Completion</div>'+
+    '<span class="qtb">'+g.questions.length+' q(s)</span>'+
+    '<div style="margin-left:auto;display:flex;gap:4px;align-items:center">'+
+    '<div class="qb-reorder-btns" onclick="event.stopPropagation()">'+
+    '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',-1)">▲</button>'+
+    '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',1)">▼</button>'+
+    '</div>'+
+    '<button class="btn btn-sm" onclick="event.stopPropagation();openEditQG(\''+mod+'\','+sp+','+gi+')">✏️ Edit</button>'+
+    '<button class="btn btn-sm btn-d" onclick="event.stopPropagation();rmQG(\''+mod+'\','+sp+','+gi+')">🗑</button>'+
+    '</div></div>';
+  h += '<div class="qb-body">';
+  if(g.instruction) h += '<div style="font-size:12px;color:var(--mu);margin-bottom:8px">'+renderBold(g.instruction||'')+'</div>';
+  // Image thumbnail
+  if(g.image){
+    h += '<img src="'+g.image+'" style="max-width:100%;max-height:160px;border-radius:var(--r);'+
+      'border:1px solid var(--b);margin-bottom:10px;cursor:zoom-in" onclick="openLB(this.src)">';
+  } else {
+    h += '<div style="padding:12px;background:var(--bg);border-radius:var(--r);text-align:center;'+
+      'color:var(--mu);font-size:13px;margin-bottom:8px">No flow-chart image uploaded yet</div>';
+  }
+  // Questions list
+  h += '<div>';
+  g.questions.forEach(function(q, qi){
+    var hasText = q.text&&q.text.trim();
+    var hasMarker = hasText&&/\[Q\d+\]/i.test(q.text);
+    var preview = hasMarker ?
+      renderBold(q.text).replace(/\[Q(\d+)\]/gi,'<span style="background:var(--bll);color:var(--bl);font-weight:700;padding:0 4px;border-radius:3px">Q$1</span>') :
+      (hasText ? renderBold(q.text) : '<em style="color:var(--mu)">Simple Q'+q.num+': ___</em>');
+    h += '<div class="q-item"><div class="q-item-h">'+
+      '<div class="q-item-num">'+q.num+'</div>'+
+      '<div style="flex:1;font-size:13px;line-height:1.6">'+preview+
+        (q.answer?'<span style="color:var(--gr);margin-left:8px;font-size:11px">✓ '+q.answer+'</span>':'')+
+      '</div>'+
+      '<button class="btn btn-sm" style="margin-right:4px" onclick="openEditQ(\''+mod+'\','+sp+','+gi+','+qi+')">✏️</button>'+
+      '<button class="btn btn-sm btn-d" onclick="rmQ(\''+mod+'\','+sp+','+gi+','+qi+')">🗑</button>'+
+      '</div></div>';
+  });
+  h += '</div>';
+  h += '<button class="btn btn-p btn-sm" style="margin-top:8px" onclick="openQ(\''+mod+'\','+sp+','+gi+')">+ Add question</button>';
+  h += '</div></div>';
+  return h;
+};
+
+console.log('JIC IELTS — Flowchart image+fill layout loaded ✓');
+</script>
