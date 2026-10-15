@@ -11959,3 +11959,233 @@ showDoneScreen = function(mod, score, correct, total){
 
 console.log('JIC IELTS — Results system loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Duplicate results + test type detection
+// ═══════════════════════════════════════════════
+
+// Override rendStudentResults to deduplicate
+// Keep only the LATEST submission per test+module combination
+rendStudentResults = function(results){
+  var el = document.getElementById('s-results');
+  if(!el) return;
+  if(!results.length){
+    el.innerHTML = '<div style="color:var(--mu);font-size:13px;padding:12px 0">No completed tests yet.</div>';
+    return;
+  }
+
+  // Deduplicate — keep latest per testId+module
+  var seen = {};
+  var deduped = [];
+  // Sort newest first so we keep the latest
+  results.sort(function(a,b){
+    var ta = a.submittedAt ? a.submittedAt.toDate ? a.submittedAt.toDate().getTime() : new Date(a.submittedAt).getTime() : 0;
+    var tb = b.submittedAt ? b.submittedAt.toDate ? b.submittedAt.toDate().getTime() : new Date(b.submittedAt).getTime() : 0;
+    return tb - ta;
+  });
+  results.forEach(function(r){
+    var key = (r.testId||'')+'_'+(r.module||'');
+    if(!seen[key]){
+      seen[key] = true;
+      deduped.push(r);
+    }
+  });
+
+  // Group by test
+  var byTest = {};
+  deduped.forEach(function(r){
+    var tid = r.testId||'unknown';
+    if(!byTest[tid]) byTest[tid] = {
+      testName: r.testName||'Test',
+      testType: r.testType||r.type||'Academic',
+      modules: []
+    };
+    byTest[tid].modules.push(r);
+  });
+
+  el.innerHTML = Object.keys(byTest).map(function(tid){
+    var t = byTest[tid];
+    var h = '<div class="s-result-card">';
+    h += '<div class="s-result-hdr">'+
+      '<div style="font-size:14px;font-weight:600">'+t.testName+'</div>'+
+      '<span style="font-size:12px;color:var(--mu)">'+t.testType+'</span>'+
+    '</div>';
+
+    // Sort modules in order: listening, reading, writing
+    var modOrder = {listening:0, reading:1, writing:2};
+    t.modules.sort(function(a,b){ return (modOrder[a.module]||0)-(modOrder[b.module]||0); });
+
+    t.modules.forEach(function(r){
+      var mod = r.module||'';
+      var icons = {listening:'🎧', reading:'📖', writing:'✏️'};
+      var submitted = '';
+      try {
+        var dt = r.submittedAt ? (r.submittedAt.toDate ? r.submittedAt.toDate() : new Date(r.submittedAt)) : null;
+        if(dt) submitted = dt.toLocaleDateString();
+      } catch(e){}
+
+      h += '<div class="s-score-row">';
+      h += '<div class="score-module-icon">'+(icons[mod]||'📝')+'</div>';
+      h += '<div class="score-info">'+
+        '<div class="score-title">'+mod.charAt(0).toUpperCase()+mod.slice(1)+'</div>'+
+        '<div class="score-sub">'+(submitted?'Submitted '+submitted:'')+'</div>'+
+      '</div>';
+
+      if(!r.released){
+        h += '<span class="pending-badge">⏳ Awaiting release</span>';
+      } else {
+        if(mod==='writing'){
+          var wb = r.writingBand||r.band||null;
+          if(wb){
+            h += '<div style="display:flex;align-items:center;gap:10px">'+
+              '<div class="score-band-wrap" style="background:'+bandBg(parseFloat(wb))+';border-radius:var(--r);padding:6px 12px">'+
+                '<div class="score-band-num" style="color:'+bandColor(parseFloat(wb))+'">'+parseFloat(wb).toFixed(1)+'</div>'+
+                '<div class="score-band-lbl" style="color:'+bandColor(parseFloat(wb))+'">Band</div>'+
+              '</div>'+
+              '<div style="font-size:12px;color:var(--mu)">Teacher graded</div>'+
+            '</div>';
+          } else {
+            h += '<span class="pending-badge">Graded — awaiting band</span>';
+          }
+        } else {
+          // Use correct test type for band calculation
+          var testType = t.testType||'Academic';
+          var band = getBand(r.correct, mod, testType);
+          var raw = (r.correct||0)+'/'+(r.total||40);
+          h += '<div style="display:flex;align-items:center;gap:10px">'+
+            '<div style="text-align:center">'+
+              '<div style="font-size:18px;font-weight:700">'+raw+'</div>'+
+              '<div style="font-size:10px;color:var(--mu)">correct</div>'+
+            '</div>';
+          if(band!==null){
+            h += '<div class="score-band-wrap" style="background:'+bandBg(band)+';border-radius:var(--r);padding:6px 12px">'+
+              '<div class="score-band-num" style="color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>'+
+              '<div class="score-band-lbl" style="color:'+bandColor(band)+'">Band</div>'+
+            '</div>';
+          }
+          h += '</div>';
+        }
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }).join('');
+};
+
+// Fix submitTest to save testType properly
+var _prevSubmitTest = submitTest;
+submitTest = function(){
+  // Add testType to result before saving
+  var origAdd = db.collection('results').add.bind(db.collection('results'));
+  var mod = testState.module;
+  var tc = testState.testContent;
+  var score = null, correct = 0, total = 0;
+
+  if(mod==='listening'||mod==='reading'){
+    var groups = [];
+    if(mod==='listening'){
+      for(var s=1;s<=4;s++){
+        var sec=tc.listening&&(tc.listening.sections[s]||tc.listening.sections[String(s)]);
+        (sec&&sec.groups||[]).forEach(function(g){ groups.push(g); });
+      }
+    } else {
+      for(var p=1;p<=3;p++){
+        var pas=tc.reading&&(tc.reading.passages[p]||tc.reading.passages[String(p)]);
+        (pas&&pas.groups||[]).forEach(function(g){ groups.push(g); });
+      }
+    }
+    groups.forEach(function(g){
+      (g.questions||[]).forEach(function(q){
+        if(!q.answer) return;
+        total++;
+        var studentAns = String(testState.answers[q.num]||'').trim();
+        if(checkAnswer(studentAns, q.answer)) correct++;
+      });
+    });
+    score = total>0?Math.round(correct/total*40):0;
+  }
+
+  var result = {
+    studentId: CU.uid,
+    studentName: (document.getElementById('s-name')||{}).textContent||'Student',
+    testId: testState.testId,
+    testName: testState.testData&&testState.testData.name||'Test',
+    testType: testState.testData&&testState.testData.type||'Academic',
+    teacherId: testState.testData&&testState.testData.teacherId||
+               (testState.assignment&&testState.assignment.teacherId)||'',
+    module: mod,
+    answers: testState.answers,
+    score: score,
+    correct: correct,
+    total: total,
+    writingTask1: testState.answers['w1']||'',
+    writingTask2: testState.answers['w2']||'',
+    released: false,
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  // Check for existing result for this student+test+module
+  // to avoid duplicates
+  db.collection('results')
+    .where('studentId','==',CU.uid)
+    .where('testId','==',testState.testId)
+    .where('module','==',mod)
+    .get()
+    .then(function(snap){
+      var pr;
+      if(!snap.empty){
+        // Update existing instead of creating new
+        pr = db.collection('results').doc(snap.docs[0].id).update(result);
+      } else {
+        pr = db.collection('results').add(result);
+      }
+      return pr;
+    })
+    .then(function(){
+      // Clear saved progress
+      if(testState.allowPause){
+        db.collection('test_progress')
+          .doc(CU.uid+'_'+testState.testId+'_'+mod)
+          .delete().catch(function(){});
+      }
+      // Notify teacher
+      if(result.teacherId){
+        db.collection('notifications').add({
+          teacherId: result.teacherId,
+          type: 'completion',
+          studentId: CU.uid,
+          studentName: result.studentName,
+          testId: testState.testId,
+          testName: result.testName,
+          module: mod,
+          score: score,
+          read: false,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(function(){});
+      }
+      showDoneScreen(mod, score, correct, total);
+    })
+    .catch(function(e){ showToast('Error submitting: '+e.message,'err'); });
+};
+
+// Fix teacher results to also deduplicate
+var _prevRendTeacherResults = rendTeacherResults;
+rendTeacherResults = function(results){
+  // Deduplicate — keep latest per studentId+testId+module
+  var seen = {};
+  var deduped = [];
+  results.sort(function(a,b){
+    var ta = a.submittedAt ? (a.submittedAt.toDate?a.submittedAt.toDate().getTime():0) : 0;
+    var tb = b.submittedAt ? (b.submittedAt.toDate?b.submittedAt.toDate().getTime():0) : 0;
+    return tb-ta;
+  });
+  results.forEach(function(r){
+    var key=(r.studentId||'')+'_'+(r.testId||'')+'_'+(r.module||'');
+    if(!seen[key]){ seen[key]=true; deduped.push(r); }
+  });
+  _prevRendTeacherResults(deduped);
+};
+
+console.log('JIC IELTS — duplicate results fix + testType fix loaded ✓');
+</script>
