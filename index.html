@@ -9831,3 +9831,919 @@ rendQGCard = function(g, gi, mod, sp){
 
 console.log('JIC IELTS — Flowchart image+fill layout loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  STAGE 2 — STUDENT TEST TAKING
+//  Listening, Reading, Writing modules
+//  Timer, auto-score, pause/resume
+// ═══════════════════════════════════════════════
+
+var stage2CSS = document.createElement('style');
+stage2CSS.textContent = `
+/* Test shell */
+#s-test { background: var(--bg); }
+.test-topbar {
+  background: var(--s);
+  border-bottom: 1px solid var(--b);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  gap: 12px;
+}
+.test-title { font-size: 15px; font-weight: 700; }
+.test-module-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+/* Timer */
+.test-timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bll);
+  border: 1px solid var(--blm);
+  border-radius: var(--r);
+  padding: 6px 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0C447C;
+  font-variant-numeric: tabular-nums;
+}
+.test-timer.warn { background: var(--aml); border-color: #FAC775; color: var(--am); }
+.test-timer.danger { background: var(--rdl); border-color: #F7C1C1; color: var(--rd); animation: pulse-timer 1s infinite; }
+@keyframes pulse-timer { 0%,100%{opacity:1} 50%{opacity:.6} }
+/* Question navigation dots */
+.q-nav-bar {
+  background: var(--s);
+  border-top: 1px solid var(--b);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  gap: 12px;
+}
+.q-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 1;
+}
+.q-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r);
+  border: 1px solid var(--bm);
+  background: var(--s);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--mu);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .15s;
+}
+.q-dot:hover { border-color: var(--bl); color: var(--bl); }
+.q-dot.answered { background: var(--grl); border-color: var(--gr); color: #085041; }
+.q-dot.current { background: var(--bll); border-color: var(--bl); color: var(--bl); font-weight: 700; }
+.q-dot.flagged { background: var(--aml); border-color: var(--am); color: var(--am); }
+/* Listening layout */
+.listen-wrap { flex: 1; overflow-y: auto; padding: 20px; max-width: 900px; margin: 0 auto; width: 100%; }
+.audio-player-bar {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.audio-play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--bl);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.audio-play-btn:hover { background: #0C447C; }
+.audio-play-btn:disabled { background: var(--mu); cursor: not-allowed; }
+.audio-progress-wrap { flex: 1; }
+.audio-progress-bar {
+  height: 6px;
+  background: var(--bm);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.audio-progress-fill {
+  height: 100%;
+  background: var(--bl);
+  width: 0%;
+  transition: width .3s linear;
+  border-radius: 3px;
+}
+/* Reading split */
+.reading-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  height: calc(100vh - 110px);
+}
+.reading-passage-side {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  border-right: 1px solid var(--b);
+  background: var(--s);
+  font-size: 14px;
+  line-height: 1.9;
+}
+.reading-passage-side h2 { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.reading-passage-side p { margin-bottom: 12px; }
+.reading-qs-side {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--bg);
+}
+/* Writing */
+.writing-wrap { flex: 1; overflow-y: auto; padding: 24px; max-width: 900px; margin: 0 auto; width: 100%; }
+.task-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.task-tab {
+  padding: 8px 20px;
+  border-radius: var(--r);
+  border: 1px solid var(--b);
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--s);
+  color: var(--mu);
+  font-family: inherit;
+  font-weight: 500;
+  transition: all .15s;
+}
+.task-tab.active { background: var(--bll); border-color: var(--bl); color: var(--bl); font-weight: 600; }
+.word-count-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.word-count-num { font-weight: 600; }
+.word-count-num.ok { color: var(--gr); }
+.word-count-num.low { color: var(--mu); }
+/* Review screen */
+.review-wrap { flex: 1; overflow-y: auto; padding: 24px; max-width: 860px; margin: 0 auto; width: 100%; }
+.review-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.review-table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--b); color: var(--mu); font-weight: 500; }
+.review-table td { padding: 8px 12px; border-bottom: 1px solid var(--b); }
+.review-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.review-dot.ans { background: var(--gr); }
+.review-dot.unans { background: var(--rd); }
+/* Pause overlay */
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.7);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.pause-overlay.show { display: flex; }
+.pause-card {
+  background: var(--s);
+  border-radius: var(--rl);
+  padding: 40px;
+  text-align: center;
+  max-width: 360px;
+  width: 100%;
+}
+`;
+document.head.appendChild(stage2CSS);
+
+// ── Add test screen to DOM ──
+var testScreen = document.createElement('div');
+testScreen.id = 's-test';
+testScreen.className = 'screen';
+testScreen.style.cssText = 'flex-direction:column;height:100vh;overflow:hidden';
+testScreen.innerHTML = `
+<div class="test-topbar" id="test-topbar">
+  <div style="display:flex;align-items:center;gap:10px">
+    <button class="btn btn-sm" id="test-exit-btn" onclick="testExit()">← Exit</button>
+    <div class="test-title" id="test-title">Test</div>
+    <span class="test-module-badge" id="test-module-badge"></span>
+  </div>
+  <div class="test-timer" id="test-timer">⏱ <span id="test-time">00:00</span></div>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-sm" id="test-flag-btn" onclick="flagCurrentQ()" title="Flag question for review">🚩 Flag</button>
+    <button class="btn btn-sm btn-p" id="test-submit-btn" onclick="showReview()">Review & Submit →</button>
+  </div>
+</div>
+<div id="test-body" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden"></div>
+<div class="q-nav-bar" id="test-nav-bar">
+  <div class="q-dots" id="test-q-dots"></div>
+  <div style="display:flex;gap:8px;flex-shrink:0">
+    <button class="btn btn-sm" onclick="testPrevQ()">← Prev</button>
+    <button class="btn btn-sm btn-p" onclick="testNextQ()">Next →</button>
+  </div>
+</div>
+<div class="pause-overlay" id="pause-overlay">
+  <div class="pause-card">
+    <div style="font-size:48px;margin-bottom:16px">⏸</div>
+    <div style="font-size:20px;font-weight:700;margin-bottom:8px">Test Paused</div>
+    <div style="font-size:13px;color:var(--mu);margin-bottom:24px">Your progress and remaining time have been saved. Click Resume to continue.</div>
+    <button class="btn btn-p btn-lg" style="width:100%" onclick="resumeTest()">▶ Resume</button>
+  </div>
+</div>
+`;
+document.body.appendChild(testScreen);
+
+// ── State ──
+var testState = {
+  testId: null, testData: null, testContent: null,
+  module: null, // 'listening' | 'reading' | 'writing'
+  curPart: 1, curPassage: 1, curTask: 1,
+  answers: {}, // {qNum: value}
+  flagged: new Set(),
+  timeLeft: 0, timerInt: null,
+  paused: false,
+  allowPause: false,
+  qList: [], // flat list of all question numbers in module
+  curQIdx: 0,
+  assignment: null
+};
+
+// ── Start module from student test card ──
+function startStudentModule(mod){
+  var asgn = currentAssignment;
+  if(!asgn){ showToast('No assignment data.','err'); return; }
+  var modules = asgn.modules||{};
+  if(!modules[mod]){ showToast('This module is not available.','err'); return; }
+  testState.testId = curTid;
+  testState.testData = tdata;
+  testState.testContent = TC[curTid];
+  testState.module = mod;
+  testState.answers = {};
+  testState.flagged = new Set();
+  testState.curPart = 1;
+  testState.curPassage = 1;
+  testState.curTask = 1;
+  testState.curQIdx = 0;
+  testState.assignment = asgn;
+  testState.allowPause = asgn['allow_pause_'+mod]||false;
+  // Check for saved progress
+  db.collection('test_progress').doc(CU.uid+'_'+curTid+'_'+mod).get().then(function(d){
+    if(d.exists && testState.allowPause){
+      var saved = d.data();
+      if(confirm('You have unfinished progress for this module. Resume where you left off?')){
+        testState.answers = saved.answers||{};
+        testState.timeLeft = saved.timeLeft||getModuleTime(mod);
+        testState.flagged = new Set(saved.flagged||[]);
+        launchTestModule();
+        return;
+      }
+    }
+    testState.timeLeft = getModuleTime(mod);
+    launchTestModule();
+  }).catch(function(){
+    testState.timeLeft = getModuleTime(mod);
+    launchTestModule();
+  });
+}
+
+function getModuleTime(mod){
+  var t = testState.testData;
+  return ((mod==='listening'?(t&&t.listeningTime||30):
+           mod==='reading'?(t&&t.readingTime||60):
+           (t&&t.writingTime||60))*60);
+}
+
+function launchTestModule(){
+  var mod = testState.module;
+  // Set UI
+  var badges = {listening:'🎧 Listening',reading:'📖 Reading',writing:'✏️ Writing'};
+  var colors = {listening:'background:var(--bll);color:#0C447C',reading:'background:var(--grl);color:#085041',writing:'background:var(--aml);color:var(--am)'};
+  document.getElementById('test-title').textContent = testState.testData&&testState.testData.name||'Test';
+  document.getElementById('test-module-badge').textContent = badges[mod]||mod;
+  document.getElementById('test-module-badge').style.cssText = colors[mod]||'';
+  // Build question list
+  buildQList();
+  // Render module
+  renderTestModule();
+  // Start timer
+  startTestTimer();
+  // Show screen
+  showS('test');
+  // Show/hide nav for writing
+  document.getElementById('test-nav-bar').style.display = mod==='writing'?'none':'flex';
+  document.getElementById('test-flag-btn').style.display = mod==='writing'?'none':'flex';
+}
+
+function buildQList(){
+  var list = [];
+  var mod = testState.module;
+  var tc = testState.testContent;
+  if(mod==='listening'){
+    for(var s=1;s<=4;s++){
+      var sec = tc&&tc.listening&&(tc.listening.sections[s]||tc.listening.sections[String(s)]);
+      (sec&&sec.groups||[]).forEach(function(g){
+        for(var q=g.fromQ;q<=g.toQ;q++) list.push({num:q,part:s,type:g.type});
+      });
+    }
+  } else if(mod==='reading'){
+    for(var p=1;p<=3;p++){
+      var pas = tc&&tc.reading&&(tc.reading.passages[p]||tc.reading.passages[String(p)]);
+      (pas&&pas.groups||[]).forEach(function(g){
+        for(var q=g.fromQ;q<=g.toQ;q++) list.push({num:q,passage:p,type:g.type});
+      });
+    }
+  }
+  testState.qList = list;
+  buildQDots();
+}
+
+function buildQDots(){
+  var el = document.getElementById('test-q-dots');
+  if(!el) return;
+  el.innerHTML = testState.qList.map(function(q,i){
+    var cls = 'q-dot';
+    if(testState.answers[q.num]!==undefined&&testState.answers[q.num]!=='') cls+=' answered';
+    if(testState.flagged.has(q.num)) cls+=' flagged';
+    if(i===testState.curQIdx) cls+=' current';
+    return '<button class="'+cls+'" onclick="jumpToQ('+i+')" title="Q'+q.num+'">'+q.num+'</button>';
+  }).join('');
+}
+
+function jumpToQ(idx){
+  testState.curQIdx = idx;
+  var q = testState.qList[idx];
+  if(!q) return;
+  // Switch part/passage if needed
+  if(testState.module==='listening' && q.part && q.part!==testState.curPart){
+    testState.curPart = q.part;
+    renderTestModule();
+  } else if(testState.module==='reading' && q.passage && q.passage!==testState.curPassage){
+    testState.curPassage = q.passage;
+    renderTestModule();
+  }
+  // Scroll to question
+  var qEl = document.getElementById('test-q-'+q.num);
+  if(qEl) qEl.scrollIntoView({behavior:'smooth',block:'center'});
+  buildQDots();
+}
+
+function testNextQ(){
+  if(testState.curQIdx < testState.qList.length-1){
+    jumpToQ(testState.curQIdx+1);
+  }
+}
+function testPrevQ(){
+  if(testState.curQIdx > 0){
+    jumpToQ(testState.curQIdx-1);
+  }
+}
+
+function flagCurrentQ(){
+  var q = testState.qList[testState.curQIdx];
+  if(!q) return;
+  if(testState.flagged.has(q.num)) testState.flagged.delete(q.num);
+  else testState.flagged.add(q.num);
+  buildQDots();
+  showToast(testState.flagged.has(q.num)?'🚩 Flagged for review':'Flag removed');
+}
+
+// ── RENDER MODULE ──
+function renderTestModule(){
+  var mod = testState.module;
+  var body = document.getElementById('test-body');
+  if(mod==='listening') renderListeningTest(body);
+  else if(mod==='reading') renderReadingTest(body);
+  else if(mod==='writing') renderWritingTest(body);
+}
+
+// ── LISTENING ──
+function renderListeningTest(body){
+  var tc = testState.testContent;
+  var sec = tc&&tc.listening&&(tc.listening.sections[testState.curPart]||tc.listening.sections[String(testState.curPart)]);
+  var h = '<div class="listen-wrap" id="listen-wrap">';
+  // Part tabs
+  h += '<div class="stabs" style="margin-bottom:16px">';
+  for(var i=1;i<=4;i++){
+    h += '<button class="stab'+(testState.curPart===i?' active':'')+'" onclick="switchTestPart('+i+')">Part '+i+'</button>';
+  }
+  h += '</div>';
+  // Audio player
+  var aud = sec&&sec.audio;
+  var audUrl = audioStore&&audioStore[testState.testId+'-sec'+testState.curPart]||(aud&&aud.objectURL)||null;
+  h += '<div class="audio-player-bar">';
+  h += '<button class="audio-play-btn" id="t-play-btn" '+(audUrl?'onclick="togTestAud()"':'disabled')+'>▶</button>';
+  h += '<div class="audio-progress-wrap">';
+  h += '<div style="font-size:12px;color:var(--mu);margin-bottom:4px">'+(aud?aud.filename:'No audio for Part '+testState.curPart)+(audUrl?' — Ready':'')+'</div>';
+  h += '<div class="audio-progress-bar" onclick="seekTestAud(event)"><div class="audio-progress-fill" id="t-aud-fill"></div></div>';
+  h += '</div>';
+  h += '<div style="font-size:12px;color:var(--mu);min-width:40px;text-align:right" id="t-aud-time">0:00</div>';
+  if(audUrl) h += '<audio id="t-audio" src="'+audUrl+'" ontimeupdate="updTestAud()" onended="endTestAud()"></audio>';
+  h += '</div>';
+  // Questions
+  (sec&&sec.groups||[]).forEach(function(g){
+    h += renderQGroup(g);
+  });
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+// ── READING ──
+function renderReadingTest(body){
+  var tc = testState.testContent;
+  body.innerHTML = '';
+  body.style.overflow = 'hidden';
+  // Passage tabs above
+  var tabBar = document.createElement('div');
+  tabBar.style.cssText = 'background:var(--s);border-bottom:1px solid var(--b);padding:0 20px;display:flex;flex-shrink:0';
+  for(var i=1;i<=3;i++){
+    var tb = document.createElement('button');
+    tb.className = 'at'+(testState.curPassage===i?' active':'');
+    tb.textContent = 'Passage '+i;
+    tb.onclick = (function(pi){ return function(){ testState.curPassage=pi; renderTestModule(); }; })(i);
+    tabBar.appendChild(tb);
+  }
+  body.appendChild(tabBar);
+  var pas = tc&&tc.reading&&(tc.reading.passages[testState.curPassage]||tc.reading.passages[String(testState.curPassage)]);
+  var split = document.createElement('div');
+  split.className = 'reading-split';
+  // Left — passage
+  var passSide = document.createElement('div');
+  passSide.className = 'reading-passage-side';
+  var ph = '';
+  if(pas&&pas.instruction) ph += '<div style="font-size:12px;color:var(--mu);font-style:italic;margin-bottom:12px;padding:8px;background:var(--bg);border-radius:var(--r)">'+renderBold(pas.instruction)+'</div>';
+  ph += '<h2>'+(pas&&pas.title||'Reading Passage '+testState.curPassage)+'</h2>';
+  (pas&&pas.text||'').split('\n').forEach(function(line){ if(line.trim()) ph += '<p>'+renderBold(line)+'</p>'; });
+  passSide.innerHTML = ph;
+  // Right — questions
+  var qSide = document.createElement('div');
+  qSide.className = 'reading-qs-side';
+  var qh = '';
+  (pas&&pas.groups||[]).forEach(function(g){ qh += renderQGroup(g); });
+  qSide.innerHTML = qh || '<div style="color:var(--mu);font-size:13px">No questions for this passage.</div>';
+  split.appendChild(passSide);
+  split.appendChild(qSide);
+  body.appendChild(split);
+}
+
+// ── WRITING ──
+function renderWritingTest(body){
+  var tc = testState.testContent;
+  var w = tc&&tc.writing;
+  var h = '<div class="writing-wrap">';
+  h += '<div class="task-tabs">';
+  h += '<button class="task-tab'+(testState.curTask===1?' active':'')+'" onclick="switchTask(1)">Task 1</button>';
+  h += '<button class="task-tab'+(testState.curTask===2?' active':'')+'" onclick="switchTask(2)">Task 2</button>';
+  h += '</div>';
+  if(testState.curTask===1){
+    h += '<div class="card">';
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
+    h += '<div class="card-t">Task 1 — '+(w&&w.task1&&w.task1.type||'Academic')+'</div>';
+    h += '<span class="badge b-am">Minimum '+(w&&w.task1&&w.task1.minWords||150)+' words</span></div>';
+    h += '<div style="font-size:13px;color:var(--mu);margin-bottom:12px;line-height:1.7">'+nl2br(w&&w.task1&&w.task1.prompt||'No prompt set.')+'</div>';
+    if(w&&w.task1&&w.task1.image&&w.task1.image!=='__large__') h += '<img src="'+w.task1.image+'" style="max-width:100%;max-height:240px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:12px;cursor:zoom-in" onclick="openLB(this.src)">';
+    h += '<textarea class="inp" id="writing-t1" rows="12" placeholder="Write your Task 1 response here..." style="min-height:200px;line-height:1.8" oninput="updWritingAns(1,this.value)">'+( testState.answers['w1']||'')+'</textarea>';
+    h += '<div class="word-count-bar"><span class="word-count-num '+(countWords2(testState.answers['w1']||'')>=(w&&w.task1&&w.task1.minWords||150)?'ok':'low')+'" id="wc-t1">'+countWords2(testState.answers['w1']||'')+' words</span><span style="color:var(--mu)">Minimum '+(w&&w.task1&&w.task1.minWords||150)+' words</span></div>';
+    h += '</div>';
+  } else {
+    h += '<div class="card">';
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
+    h += '<div class="card-t">Task 2 — Essay</div>';
+    h += '<span class="badge b-am">Minimum '+(w&&w.task2&&w.task2.minWords||250)+' words</span></div>';
+    h += '<div style="font-size:13px;color:var(--mu);margin-bottom:12px;line-height:1.7">'+nl2br(w&&w.task2&&w.task2.prompt||'No prompt set.')+'</div>';
+    h += '<textarea class="inp" id="writing-t2" rows="16" placeholder="Write your Task 2 essay here..." style="min-height:280px;line-height:1.8" oninput="updWritingAns(2,this.value)">'+( testState.answers['w2']||'')+'</textarea>';
+    h += '<div class="word-count-bar"><span class="word-count-num '+(countWords2(testState.answers['w2']||'')>=(w&&w.task2&&w.task2.minWords||250)?'ok':'low')+'" id="wc-t2">'+countWords2(testState.answers['w2']||'')+' words</span><span style="color:var(--mu)">Minimum '+(w&&w.task2&&w.task2.minWords||250)+' words</span></div>';
+    h += '</div>';
+  }
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+function switchTask(n){ testState.curTask=n; renderTestModule(); }
+function switchTestPart(n){ testState.curPart=n; renderTestModule(); buildQDots(); }
+
+function updWritingAns(task, val){
+  testState.answers['w'+task] = val;
+  var wc = document.getElementById('wc-t'+task);
+  if(!wc) return;
+  var count = countWords2(val);
+  var tc = testState.testContent;
+  var w = tc&&tc.writing;
+  var min = task===1?(w&&w.task1&&w.task1.minWords||150):(w&&w.task2&&w.task2.minWords||250);
+  wc.textContent = count+' words';
+  wc.className = 'word-count-num '+(count>=min?'ok':'low');
+}
+
+function countWords2(str){ return str.trim()===''?0:str.trim().split(/\s+/).length; }
+
+// ── RENDER QUESTION GROUP (reuse prev logic) ──
+function renderQGroup(g){
+  // Use buildPrevQBlock but wire answers to testState
+  var h = buildPrevQBlock(g, function(){ return 0; });
+  // Replace prevAnswers references with testAnswers
+  h = h.replace(/prevAnswers\[(\d+)\]=this\.value/g, function(m, n){
+    return 'testAns('+n+',this.value)';
+  });
+  h = h.replace(/updMulti\(('?\d+'?)\)/g, function(m, n){
+    return 'updMultiTest('+n+')';
+  });
+  h = h.replace(/togMCQMv2\(/g, 'togMCQMv2Test(');
+  // Wrap in question anchor divs
+  h = h.replace(/Question (\d+)/g, function(m, n){
+    return '<span id="test-q-'+n+'">Question '+n+'</span>';
+  });
+  return h;
+}
+
+function testAns(qNum, val){
+  testState.answers[qNum] = val;
+  buildQDots();
+  autoSaveProgress();
+}
+
+function updMultiTest(qn){
+  // Same as updMulti but saves to testState
+  var cbs = document.querySelectorAll('input[type=checkbox][onchange*="updMultiTest('+qn+')"]');
+  var vals = [];
+  cbs.forEach(function(c){ if(c.checked) vals.push(c.value); });
+  testState.answers[qn] = vals.join(',');
+  buildQDots();
+  autoSaveProgress();
+}
+
+function togMCQMv2Test(groupId, letter, maxChoose, fromQ, toQ){
+  togMCQMv2(groupId, letter, maxChoose, fromQ, toQ);
+  // Sync from prevAnswers to testState
+  for(var qi=fromQ;qi<=toQ;qi++){
+    testState.answers[qi] = prevAnswers[qi]||'';
+  }
+  buildQDots();
+  autoSaveProgress();
+}
+
+// ── TIMER ──
+function startTestTimer(){
+  clearInterval(testState.timerInt);
+  updateTimerDisplay();
+  testState.timerInt = setInterval(function(){
+    if(testState.paused) return;
+    testState.timeLeft--;
+    if(testState.timeLeft<=0){
+      clearInterval(testState.timerInt);
+      showToast('Time is up! Submitting...','err');
+      submitTest();
+      return;
+    }
+    updateTimerDisplay();
+    autoSaveProgress();
+  },1000);
+}
+
+function updateTimerDisplay(){
+  var t = testState.timeLeft;
+  var mm = Math.floor(t/60), ss = t%60;
+  var el = document.getElementById('test-time');
+  var tb = document.getElementById('test-timer');
+  if(el) el.textContent = String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+  if(tb){
+    tb.className = 'test-timer';
+    if(t<300) tb.classList.add('danger');
+    else if(t<600) tb.classList.add('warn');
+  }
+}
+
+// ── AUDIO ──
+var testAudPlaying = false;
+function togTestAud(){
+  var el = document.getElementById('t-audio');
+  var btn = document.getElementById('t-play-btn');
+  if(!el) return;
+  if(testAudPlaying){ el.pause(); btn.innerHTML='▶'; testAudPlaying=false; }
+  else { el.play(); btn.innerHTML='⏸'; testAudPlaying=true; }
+}
+function updTestAud(){
+  var el = document.getElementById('t-audio');
+  if(!el||!el.duration) return;
+  document.getElementById('t-aud-fill').style.width=(el.currentTime/el.duration*100)+'%';
+  var mm=Math.floor(el.currentTime/60),ss=Math.floor(el.currentTime%60);
+  document.getElementById('t-aud-time').textContent=mm+':'+String(ss).padStart(2,'0');
+}
+function endTestAud(){
+  var btn=document.getElementById('t-play-btn');
+  if(btn) btn.innerHTML='▶';
+  testAudPlaying=false;
+}
+function seekTestAud(e){
+  var el=document.getElementById('t-audio');
+  if(!el||!el.duration) return;
+  var rect=e.currentTarget.getBoundingClientRect();
+  el.currentTime=((e.clientX-rect.left)/rect.width)*el.duration;
+}
+
+// ── PAUSE / RESUME ──
+function testExit(){
+  if(testState.allowPause){
+    testState.paused = true;
+    autoSaveProgress();
+    document.getElementById('pause-overlay').classList.add('show');
+  } else {
+    if(confirm('Exit test? Your progress will be lost as this module does not allow pausing.')){
+      clearInterval(testState.timerInt);
+      showS('student');
+    }
+  }
+}
+
+function resumeTest(){
+  testState.paused = false;
+  document.getElementById('pause-overlay').classList.remove('show');
+}
+
+function autoSaveProgress(){
+  if(!testState.allowPause||!CU||!testState.testId) return;
+  var key = CU.uid+'_'+testState.testId+'_'+testState.module;
+  db.collection('test_progress').doc(key).set({
+    answers: testState.answers,
+    timeLeft: testState.timeLeft,
+    flagged: Array.from(testState.flagged),
+    module: testState.module,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(function(){});
+}
+
+// ── REVIEW SCREEN ──
+function showReview(){
+  clearInterval(testState.timerInt);
+  var mod = testState.module;
+  var body = document.getElementById('test-body');
+  var answered = Object.keys(testState.answers).filter(function(k){
+    return testState.answers[k]!==undefined&&testState.answers[k]!=='';
+  }).length;
+  var total = mod==='writing'?2:testState.qList.length;
+  var h = '<div class="review-wrap">';
+  h += '<div style="font-size:20px;font-weight:700;margin-bottom:6px">Review your answers</div>';
+  h += '<div style="font-size:13px;color:var(--mu);margin-bottom:20px">Answered: <strong>'+answered+'</strong> / '+total+'. Check below before submitting.</div>';
+  if(mod==='writing'){
+    var tc=testState.testContent,w=tc&&tc.writing;
+    var wc1=countWords2(testState.answers['w1']||''),wc2=countWords2(testState.answers['w2']||'');
+    var min1=w&&w.task1&&w.task1.minWords||150,min2=w&&w.task2&&w.task2.minWords||250;
+    h += '<table class="review-table"><thead><tr><th>Task</th><th>Words written</th><th>Minimum</th><th>Status</th></tr></thead><tbody>';
+    h += '<tr><td>Task 1</td><td><strong>'+wc1+'</strong></td><td>'+min1+'</td><td>'+(wc1>=min1?'<span class="review-dot ans"></span>Met':'<span class="review-dot unans"></span>Below minimum')+'</td></tr>';
+    h += '<tr><td>Task 2</td><td><strong>'+wc2+'</strong></td><td>'+min2+'</td><td>'+(wc2>=min2?'<span class="review-dot ans"></span>Met':'<span class="review-dot unans"></span>Below minimum')+'</td></tr>';
+    h += '</tbody></table>';
+  } else {
+    h += '<table class="review-table"><thead><tr><th>Q#</th><th>Your answer</th><th>Status</th><th></th></tr></thead><tbody>';
+    testState.qList.forEach(function(q,i){
+      var ans = testState.answers[q.num];
+      var hasAns = ans!==undefined&&ans!=='';
+      var isFlagged = testState.flagged.has(q.num);
+      h += '<tr>'+
+        '<td><strong>Q'+q.num+'</strong></td>'+
+        '<td style="color:var(--mu)">'+( hasAns?String(ans).substring(0,40):'-')+'</td>'+
+        '<td>'+(hasAns?'<span class="review-dot ans"></span>Answered':'<span class="review-dot unans"></span>Not answered')+
+          (isFlagged?' 🚩':'')+
+        '</td>'+
+        '<td><button class="btn btn-sm" onclick="goBackToQ('+i+')">Edit</button></td>'+
+        '</tr>';
+    });
+    h += '</tbody></table>';
+  }
+  h += '<div style="display:flex;gap:10px;margin-top:20px">'+
+    '<button class="btn" style="flex:1" onclick="backFromReview()">← Back to test</button>'+
+    '<button class="btn btn-p" style="flex:1;background:var(--gr);border-color:var(--gr)" onclick="submitTest()">✅ Submit '+mod.charAt(0).toUpperCase()+mod.slice(1)+'</button>'+
+    '</div>';
+  h += '</div>';
+  body.innerHTML = h;
+  document.getElementById('test-nav-bar').style.display='none';
+}
+
+function backFromReview(){
+  startTestTimer();
+  renderTestModule();
+  document.getElementById('test-nav-bar').style.display=testState.module==='writing'?'none':'flex';
+}
+
+function goBackToQ(idx){
+  backFromReview();
+  setTimeout(function(){ jumpToQ(idx); },100);
+}
+
+// ── SUBMIT + AUTO SCORE ──
+function submitTest(){
+  clearInterval(testState.timerInt);
+  var mod = testState.module;
+  var tc = testState.testContent;
+  var score = null, correct = 0, total = 0;
+  // Auto score Listening and Reading
+  if(mod==='listening'||mod==='reading'){
+    var groups = [];
+    if(mod==='listening'){
+      for(var s=1;s<=4;s++){
+        var sec=tc.listening.sections[s]||tc.listening.sections[String(s)];
+        (sec&&sec.groups||[]).forEach(function(g){ groups.push(g); });
+      }
+    } else {
+      for(var p=1;p<=3;p++){
+        var pas=tc.reading.passages[p]||tc.reading.passages[String(p)];
+        (pas&&pas.groups||[]).forEach(function(g){ groups.push(g); });
+      }
+    }
+    groups.forEach(function(g){
+      g.questions.forEach(function(q){
+        if(!q.answer) return;
+        total++;
+        var studentAns = String(testState.answers[q.num]||'').trim();
+        if(checkAnswer(studentAns, q.answer)) correct++;
+      });
+    });
+    score = total>0?Math.round(correct/total*40):0; // out of 40
+  }
+  // Save result
+  var result = {
+    studentId: CU.uid,
+    studentName: document.getElementById('s-name').textContent,
+    testId: testState.testId,
+    testName: testState.testData&&testState.testData.name||'Test',
+    teacherId: testState.testData&&testState.testData.teacherId||testState.assignment&&testState.assignment.teacherId||'',
+    module: mod,
+    answers: testState.answers,
+    score: score,
+    correct: correct,
+    total: total,
+    writingTask1: testState.answers['w1']||'',
+    writingTask2: testState.answers['w2']||'',
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('results').add(result).then(function(){
+    // Clear saved progress
+    if(testState.allowPause){
+      db.collection('test_progress').doc(CU.uid+'_'+testState.testId+'_'+mod).delete().catch(function(){});
+    }
+    // Create notification for teacher
+    if(result.teacherId){
+      db.collection('notifications').add({
+        teacherId: result.teacherId,
+        type: 'completion',
+        studentId: CU.uid,
+        studentName: result.studentName,
+        testId: testState.testId,
+        testName: result.testName,
+        module: mod,
+        score: score,
+        read: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(function(){});
+    }
+    showDoneScreen(mod, score, correct, total);
+  }).catch(function(e){ showToast('Error submitting: '+e.message,'err'); });
+}
+
+function showDoneScreen(mod, score, correct, total){
+  var body = document.getElementById('test-body');
+  document.getElementById('test-nav-bar').style.display='none';
+  document.getElementById('test-topbar').style.display='none';
+  var isWriting = mod==='writing';
+  body.innerHTML =
+    '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px;text-align:center">'+
+    '<div style="width:80px;height:80px;border-radius:50%;background:var(--grl);display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:20px">✓</div>'+
+    '<div style="font-size:24px;font-weight:700;margin-bottom:8px">'+mod.charAt(0).toUpperCase()+mod.slice(1)+' submitted!</div>'+
+    (isWriting?
+      '<div style="font-size:14px;color:var(--mu);margin-bottom:24px;max-width:400px">Your writing has been saved. Your teacher will review and grade it.</div>':
+      '<div style="margin-bottom:24px">'+
+        '<div style="font-size:14px;color:var(--mu);margin-bottom:16px">Your score will be shown when results are released.</div>'+
+      '</div>'
+    )+
+    '<button class="btn btn-p btn-lg" onclick="exitToStudent()">← Back to tests</button>'+
+    '</div>';
+}
+
+function exitToStudent(){
+  clearInterval(testState.timerInt);
+  document.getElementById('test-topbar').style.display='flex';
+  document.getElementById('test-nav-bar').style.display='flex';
+  showS('student');
+  loadStudentTests();
+}
+
+// ── Override module card onclick ──
+// Update showAssignedModulePicker to use startStudentModule
+var _prevShowAssignedModulePicker = showAssignedModulePicker;
+showAssignedModulePicker = function(testId, t, asgn){
+  var modules = asgn.modules||{};
+  var isFullTest = asgn.mode==='full';
+  var dueStr = asgn.dueDate||'';
+  var h='<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'+
+    '<button class="btn btn-sm" onclick="backToStudentHome()">← Back</button>'+
+    '<div style="font-size:18px;font-weight:600">'+t.name+'</div>'+
+    (isFullTest?'<span class="badge b-pu">Full test — complete in order</span>':'')+
+    '</div>';
+  if(dueStr){
+    var due=new Date(dueStr),now=new Date(),diff=Math.ceil((due-now)/(1000*60*60*24));
+    var cls=diff<0?'overdue':diff<=3?'soon':'ok';
+    h+='<div class="due-badge '+cls+'" style="margin-bottom:16px;font-size:13px">📅 Due: '+due.toLocaleDateString()+(diff<0?' (Overdue)':diff<=3?' ('+diff+' days left)':'')+'</div>';
+  }
+  var modOrder=['listening','reading','writing'];
+  var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+  var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+  var times={listening:t.listeningTime||30,reading:t.readingTime||60,writing:t.writingTime||60};
+  var colors={listening:'var(--bll)',reading:'var(--grl)',writing:'var(--aml)'};
+  h+='<div>';
+  modOrder.forEach(function(m,mi){
+    var avail=modules[m];
+    h+='<div class="module-card'+(avail?'':' locked')+'" '+
+      (avail?'onclick="startStudentModule(\''+m+'\')"':'')+
+      ' style="background:'+(avail?colors[m]:'var(--bg)')+'">'+
+      '<div class="mc-icon" style="background:rgba(255,255,255,.4)">'+icons[m]+(avail?'':'🔒')+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:14px;font-weight:600">'+labels[m]+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+(avail?times[m]+' min':'Not available')+'</div>'+
+      '</div>'+
+      (avail?'<span class="badge b-gr">Start →</span>':'<span class="badge b-gy">Locked</span>')+
+      '</div>';
+  });
+  h+='</div>';
+  document.getElementById('shome').style.display='none';
+  var spick=document.getElementById('spick');
+  if(spick){spick.style.display='block';spick.innerHTML=h;}
+};
+
+// ── Update assignment modal to include pause settings ──
+var _prevSaveAssignment = saveAssignment;
+saveAssignment = function(){
+  if(!assignTestId){showToast('No test selected.','err');return;}
+  if(!selectedStudentIds.size){showToast('Please select at least one student.','err');return;}
+  var dueDate=document.getElementById('assign-due').value;
+  var pauseL=document.getElementById('pause-listening')&&document.getElementById('pause-listening').checked;
+  var pauseR=document.getElementById('pause-reading')&&document.getElementById('pause-reading').checked;
+  var pauseW=document.getElementById('pause-writing')&&document.getElementById('pause-writing').checked;
+  var data={
+    testId:assignTestId, testName:assignTestName,
+    teacherId:CU.uid,
+    teacherName:document.getElementById('t-name').textContent,
+    studentIds:Array.from(selectedStudentIds),
+    modules:assignMode==='full'?{listening:true,reading:true,writing:true}:assignModules,
+    mode:assignMode, dueDate:dueDate,
+    allow_pause_listening:pauseL||false,
+    allow_pause_reading:pauseR||false,
+    allow_pause_writing:pauseW||false,
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('assignments').where('testId','==',assignTestId).where('teacherId','==',CU.uid).get().then(function(snap){
+    var pr;
+    if(!snap.empty)pr=db.collection('assignments').doc(snap.docs[0].id).update(data);
+    else pr=db.collection('assignments').add(data);
+    return pr;
+  }).then(function(){
+    closeM('assign');
+    showToast('Assignment saved! '+selectedStudentIds.size+' student(s) assigned.');
+  }).catch(function(e){showToast('Error: '+e.message,'err');});
+};
+
+// Add pause toggles to assignment modal
+var assignMbd = document.querySelector('#mo-assign .mbd');
+if(assignMbd){
+  var pauseDiv = document.createElement('div');
+  pauseDiv.style.marginTop='12px';
+  pauseDiv.innerHTML=
+    '<label class="fl">Allow pause & resume (per module)</label>'+
+    '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
+    '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pause-listening"> 🎧 Listening</label>'+
+    '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pause-reading"> 📖 Reading</label>'+
+    '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pause-writing"> ✏️ Writing</label>'+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--mu);margin-top:4px">If enabled, students can exit and resume with their timer paused.</div>';
+  assignMbd.appendChild(pauseDiv);
+}
+
+console.log('JIC IELTS — Stage 2 student test-taking loaded ✓');
+</script>
