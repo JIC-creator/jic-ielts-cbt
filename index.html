@@ -11093,3 +11093,179 @@ loadMyTests = function(){
 
 console.log('JIC IELTS — assign button + purple CSS fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Assignment modal not found
+//  Build modal fresh every time openAssignModal is called
+// ═══════════════════════════════════════════════
+
+openAssignModal = function(testId, testName){
+  assignTestId = testId;
+  assignTestName = testName;
+  assignMode = 'skill';
+  assignModules = {listening:true, reading:false, writing:false};
+  selectedStudentIds = new Set();
+
+  // Remove existing modal if present
+  var existing = document.getElementById('mo-assign');
+  if(existing) existing.parentNode.removeChild(existing);
+
+  // Build fresh modal
+  var due = new Date(); due.setDate(due.getDate()+7);
+  var dueStr = due.toISOString().split('T')[0];
+
+  var modal = document.createElement('div');
+  modal.className = 'mo open'; // open immediately
+  modal.id = 'mo-assign';
+  modal.onclick = function(e){ if(e.target===modal) closeAssignModal(); };
+  modal.innerHTML =
+    '<div class="mb" style="max-width:600px;max-height:90vh;display:flex;flex-direction:column">'+
+    '<div class="mh">'+
+      '<div class="mt">Assign: '+testName+'</div>'+
+      '<button class="btn btn-sm" onclick="closeAssignModal()">✕</button>'+
+    '</div>'+
+    '<div class="mbd" style="overflow-y:auto;flex:1">'+
+      // Mode
+      '<label class="fl">Assignment mode</label>'+
+      '<div style="display:flex;gap:8px;margin-bottom:16px">'+
+        '<button class="assign-mode-btn active" id="mode-skill" onclick="selAssignMode(\'skill\',this)">'+
+          '<span class="ami">🎯</span>Skill practice<div class="amd">Unlock specific modules only</div>'+
+        '</button>'+
+        '<button class="assign-mode-btn" id="mode-full" onclick="selAssignMode(\'full\',this)">'+
+          '<span class="ami">📋</span>Full test<div class="amd">All modules in order</div>'+
+        '</button>'+
+      '</div>'+
+      // Modules
+      '<div id="assign-modules">'+
+        '<label class="fl">Modules to unlock</label>'+
+        '<div class="module-toggle active" id="mt-listening" onclick="togModule(\'listening\')">'+
+          '<input type="checkbox" id="mc-listening" checked onclick="event.stopPropagation();togModule(\'listening\')">'+
+          '<span style="font-size:18px">🎧</span><span style="font-size:13px;font-weight:500">Listening</span>'+
+        '</div>'+
+        '<div class="module-toggle" id="mt-reading" onclick="togModule(\'reading\')">'+
+          '<input type="checkbox" id="mc-reading" onclick="event.stopPropagation();togModule(\'reading\')">'+
+          '<span style="font-size:18px">📖</span><span style="font-size:13px;font-weight:500">Reading</span>'+
+        '</div>'+
+        '<div class="module-toggle" id="mt-writing" onclick="togModule(\'writing\')">'+
+          '<input type="checkbox" id="mc-writing" onclick="event.stopPropagation();togModule(\'writing\')">'+
+          '<span style="font-size:18px">✏️</span><span style="font-size:13px;font-weight:500">Writing</span>'+
+        '</div>'+
+      '</div>'+
+      // Full test info
+      '<div id="assign-full-info" style="display:none;background:var(--bll);border-radius:var(--r);padding:10px 12px;font-size:13px;color:#0C447C;margin-bottom:14px">'+
+        '📋 Students must complete: <strong>Listening → Reading → Writing</strong>'+
+      '</div>'+
+      // Pause settings
+      '<div style="margin-top:12px;margin-bottom:4px"><label class="fl">Allow pause & resume (per module)</label>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px">'+
+        '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pause-listening"> 🎧 Listening</label>'+
+        '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pause-reading"> 📖 Reading</label>'+
+        '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pause-writing"> ✏️ Writing</label>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--mu)">If enabled, students can exit and resume with timer paused.</div></div>'+
+      // Due date
+      '<div class="fr" style="margin-top:12px"><label class="fl">Due date</label>'+
+        '<input class="inp" type="date" id="assign-due" value="'+dueStr+'" style="width:200px">'+
+      '</div>'+
+      // Students
+      '<label class="fl">Select students</label>'+
+      '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+        '<button class="btn btn-sm btn-p" onclick="selAllStudents(true)">Select all</button>'+
+        '<button class="btn btn-sm" onclick="selAllStudents(false)">Deselect all</button>'+
+        '<input class="inp" id="assign-search" placeholder="Search students..." oninput="filtAssignStudents()" style="flex:1">'+
+      '</div>'+
+      '<div id="assign-student-list" style="border:1px solid var(--b);border-radius:var(--r);max-height:220px;overflow-y:auto">'+
+        '<div style="padding:12px;color:var(--mu);font-size:13px;text-align:center">'+
+          '<div style="font-size:20px;margin-bottom:6px">⏳</div>Loading students...'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mf" style="flex-shrink:0">'+
+      '<button class="btn" onclick="closeAssignModal()">Cancel</button>'+
+      '<button class="btn btn-p" onclick="saveAssignment()">💾 Save assignment</button>'+
+    '</div>'+
+    '</div>';
+  document.body.appendChild(modal);
+
+  // Load existing assignment then fetch students
+  db.collection('assignments')
+    .where('testId','==',testId)
+    .where('teacherId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      if(!snap.empty){
+        var ex = snap.docs[0].data();
+        if(ex.modules) assignModules = ex.modules;
+        if(ex.mode){
+          assignMode = ex.mode;
+          var msk = document.getElementById('mode-skill');
+          var mfu = document.getElementById('mode-full');
+          if(msk) msk.classList.toggle('active', ex.mode==='skill');
+          if(mfu) mfu.classList.toggle('active', ex.mode==='full');
+          var mp = document.getElementById('assign-modules');
+          var fi = document.getElementById('assign-full-info');
+          if(mp) mp.style.display = ex.mode==='skill'?'block':'none';
+          if(fi) fi.style.display = ex.mode==='full'?'block':'none';
+        }
+        if(ex.dueDate){
+          var de = document.getElementById('assign-due');
+          if(de) de.value = ex.dueDate;
+        }
+        if(ex.studentIds) ex.studentIds.forEach(function(id){ selectedStudentIds.add(id); });
+        ['listening','reading','writing'].forEach(function(m){
+          var cb = document.getElementById('mc-'+m);
+          var tog = document.getElementById('mt-'+m);
+          var pcb = document.getElementById('pause-'+m);
+          if(cb) cb.checked = assignModules[m]||false;
+          if(tog) tog.classList.toggle('active', assignModules[m]||false);
+          if(pcb) pcb.checked = ex['allow_pause_'+m]||false;
+        });
+      }
+      fetchAndShowAssignStudents();
+    })
+    .catch(function(){ fetchAndShowAssignStudents(); });
+};
+
+function closeAssignModal(){
+  var modal = document.getElementById('mo-assign');
+  if(modal) modal.parentNode.removeChild(modal);
+}
+
+// Update saveAssignment to use closeAssignModal
+saveAssignment = function(){
+  if(!assignTestId){ showToast('No test selected.','err'); return; }
+  if(!selectedStudentIds.size){ showToast('Please select at least one student.','err'); return; }
+  var dueDate = (document.getElementById('assign-due')||{}).value||'';
+  var pauseL = document.getElementById('pause-listening')&&document.getElementById('pause-listening').checked;
+  var pauseR = document.getElementById('pause-reading')&&document.getElementById('pause-reading').checked;
+  var pauseW = document.getElementById('pause-writing')&&document.getElementById('pause-writing').checked;
+  var mods = assignMode==='full'?{listening:true,reading:true,writing:true}:assignModules;
+  var data = {
+    testId: assignTestId, testName: assignTestName,
+    teacherId: CU.uid,
+    teacherName: (document.getElementById('t-name')||{}).textContent||'',
+    studentIds: Array.from(selectedStudentIds),
+    modules: mods, mode: assignMode, dueDate: dueDate,
+    allow_pause_listening: pauseL||false,
+    allow_pause_reading: pauseR||false,
+    allow_pause_writing: pauseW||false,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('assignments')
+    .where('testId','==',assignTestId)
+    .where('teacherId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      if(!snap.empty) return db.collection('assignments').doc(snap.docs[0].id).update(data);
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      return db.collection('assignments').add(data);
+    })
+    .then(function(){
+      closeAssignModal();
+      showToast('✓ Assignment saved! '+selectedStudentIds.size+' student(s) assigned.');
+    })
+    .catch(function(e){ showToast('Error saving: '+e.message,'err'); });
+};
+
+console.log('JIC IELTS — assign modal rebuild fix loaded ✓');
+</script>
