@@ -12189,3 +12189,218 @@ rendTeacherResults = function(results){
 
 console.log('JIC IELTS — duplicate results fix + testType fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  STUDENT BELL NOTIFICATION
+//  Notifies student when results are released
+// ═══════════════════════════════════════════════
+
+// ── Add bell to student topbar ──
+var sTopbar = document.querySelector('#s-student .topbar');
+if(sTopbar){
+  var sBellWrap = document.createElement('div');
+  sBellWrap.style.cssText = 'position:relative;display:flex;align-items:center;margin-right:8px';
+  sBellWrap.innerHTML =
+    '<button class="notif-bell" id="s-bell" onclick="togSNotifDropdown()" title="Notifications">🔔'+
+    '<span class="notif-badge" id="s-bell-badge" style="display:none">0</span></button>'+
+    '<div class="notif-dropdown" id="s-notif-dropdown">'+
+      '<div class="notif-hdr">'+
+        '<span>Notifications</span>'+
+        '<button class="btn btn-sm" onclick="markAllSRead()">Mark all read</button>'+
+      '</div>'+
+      '<div id="s-notif-list"><div class="notif-empty">No notifications yet.</div></div>'+
+    '</div>';
+  // Insert before sign out button
+  var signOut = sTopbar.querySelector('.btn');
+  if(signOut) sTopbar.insertBefore(sBellWrap, signOut);
+  else sTopbar.appendChild(sBellWrap);
+}
+
+var sNotifOpen = false;
+var sNotifications = [];
+
+function togSNotifDropdown(){
+  sNotifOpen = !sNotifOpen;
+  var dd = document.getElementById('s-notif-dropdown');
+  if(dd) dd.classList.toggle('open', sNotifOpen);
+  if(sNotifOpen) loadSNotifications();
+}
+
+// Close when clicking outside
+document.addEventListener('click', function(e){
+  var bell = document.getElementById('s-bell');
+  var dd = document.getElementById('s-notif-dropdown');
+  if(dd && bell && !bell.contains(e.target) && !dd.contains(e.target)){
+    sNotifOpen = false;
+    dd.classList.remove('open');
+  }
+});
+
+function loadSNotifications(){
+  if(!CU) return;
+  db.collection('notifications')
+    .where('userId','==',CU.uid)
+    .orderBy('createdAt','desc')
+    .limit(20)
+    .get()
+    .then(function(snap){
+      sNotifications = [];
+      snap.forEach(function(d){ sNotifications.push(Object.assign({id:d.id},d.data())); });
+      rendSNotifications();
+      updSBellBadge();
+    })
+    .catch(function(){
+      // Try without orderBy if index missing
+      db.collection('notifications').where('userId','==',CU.uid).get().then(function(snap){
+        sNotifications = [];
+        snap.forEach(function(d){ sNotifications.push(Object.assign({id:d.id},d.data())); });
+        sNotifications.sort(function(a,b){
+          var ta=a.createdAt?(a.createdAt.toDate?a.createdAt.toDate().getTime():0):0;
+          var tb=b.createdAt?(b.createdAt.toDate?b.createdAt.toDate().getTime():0):0;
+          return tb-ta;
+        });
+        rendSNotifications();
+        updSBellBadge();
+      }).catch(function(){});
+    });
+}
+
+function rendSNotifications(){
+  var el = document.getElementById('s-notif-list');
+  if(!el) return;
+  if(!sNotifications.length){
+    el.innerHTML = '<div class="notif-empty">No notifications yet.</div>';
+    return;
+  }
+  el.innerHTML = sNotifications.map(function(n){
+    var time = '';
+    try {
+      var dt = n.createdAt?(n.createdAt.toDate?n.createdAt.toDate():new Date(n.createdAt)):null;
+      if(dt) time = dt.toLocaleString();
+    } catch(e){}
+    var icon = n.type==='result_released'?'📊':'📋';
+    var msg = n.type==='result_released'?
+      'Your <strong>'+( n.module||'').charAt(0).toUpperCase()+(n.module||'').slice(1)+
+      '</strong> result for <strong>'+n.testName+'</strong> has been released!':
+      (n.message||'New notification');
+    return '<div class="notif-item'+(n.read?'':' unread')+'" onclick="tapSNotif(\''+n.id+'\',\''+n.type+'\',\''+n.testId+'\')">'+
+      '<div style="display:flex;align-items:flex-start;gap:10px">'+
+        '<span style="font-size:20px;flex-shrink:0">'+icon+'</span>'+
+        '<div style="flex:1">'+
+          '<div class="ni-detail">'+msg+'</div>'+
+          '<div class="ni-time">'+time+'</div>'+
+          (n.type==='result_released'&&!n.read?
+            '<div style="margin-top:6px"><button class="btn btn-p btn-sm" onclick="event.stopPropagation();tapSNotif(\''+n.id+'\',\''+n.type+'\',\''+n.testId+'\')">View result →</button></div>':'')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function updSBellBadge(){
+  var unread = sNotifications.filter(function(n){return !n.read;}).length;
+  var badge = document.getElementById('s-bell-badge');
+  if(badge){
+    badge.style.display = unread?'flex':'none';
+    badge.textContent = unread>9?'9+':String(unread);
+  }
+}
+
+function tapSNotif(id, type, testId){
+  // Mark as read
+  db.collection('notifications').doc(id).update({read:true}).catch(function(){});
+  var n = sNotifications.find(function(x){return x.id===id;});
+  if(n) n.read=true;
+  rendSNotifications();
+  updSBellBadge();
+  // Close dropdown
+  sNotifOpen = false;
+  var dd = document.getElementById('s-notif-dropdown');
+  if(dd) dd.classList.remove('open');
+  // Scroll to results section
+  if(type==='result_released'){
+    // Reload results then scroll
+    loadStudentResults();
+    setTimeout(function(){
+      var el = document.getElementById('s-results');
+      if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    }, 800);
+  }
+}
+
+function markAllSRead(){
+  var batch = db.batch();
+  sNotifications.filter(function(n){return !n.read;}).forEach(function(n){
+    batch.update(db.collection('notifications').doc(n.id),{read:true});
+  });
+  batch.commit().then(function(){
+    sNotifications.forEach(function(n){n.read=true;});
+    rendSNotifications();
+    updSBellBadge();
+  });
+}
+
+// ── Poll for new notifications every 60 seconds ──
+var sNotifInterval = null;
+function startSNotifPolling(){
+  clearInterval(sNotifInterval);
+  loadSNotifications();
+  sNotifInterval = setInterval(function(){
+    if(CRole==='student'&&CU) loadSNotifications();
+  }, 60000);
+}
+
+// ── Override releaseResult to send proper student notification ──
+var _prevReleaseResult = releaseResult;
+releaseResult = function(resultId, mod){
+  var data = {released:true, releasedAt:firebase.firestore.FieldValue.serverTimestamp()};
+  if(mod==='writing'){
+    var gradeEl = document.getElementById('w-grade-'+resultId);
+    var band = gradeEl?parseFloat(gradeEl.value):null;
+    if(!band||band<1||band>9){showToast('Please enter a valid band score (1.0–9.0).','err');return;}
+    data.writingBand = band;
+    data.band = band;
+  }
+  db.collection('results').doc(resultId).update(data).then(function(){
+    showToast('✓ Result released to student!');
+    // Update local cache
+    var r = (window._allResults||[]).find(function(x){return x.id===resultId;});
+    if(r){
+      r.released = true;
+      if(data.writingBand) r.writingBand = data.writingBand;
+    }
+    filterResults();
+    // Send notification to student
+    var res = (window._allResults||[]).find(function(x){return x.id===resultId;});
+    if(res&&res.studentId){
+      db.collection('notifications').add({
+        userId: res.studentId, // student's notification
+        teacherId: CU.uid,
+        type: 'result_released',
+        testId: res.testId,
+        testName: res.testName||'Test',
+        module: res.module||mod,
+        read: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(function(e){ console.error('Notif error:',e); });
+    }
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+};
+
+// ── Wire up: start polling when student logs in ──
+var _prevLoadStudent3 = loadStudent;
+loadStudent = function(d){
+  _prevLoadStudent3(d);
+  setTimeout(startSNotifPolling, 1000);
+};
+
+// ── Stop polling on sign out ──
+var _prevDoOut = doOut;
+doOut = function(){
+  clearInterval(sNotifInterval);
+  sNotifications = [];
+  if(_prevDoOut) _prevDoOut();
+};
+
+console.log('JIC IELTS — student bell notifications loaded ✓');
+</script>
