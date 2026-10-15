@@ -10941,3 +10941,155 @@ doReg = function(){
 
 console.log('JIC IELTS — student loading fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Purple CSS variables + Assign modal
+// ═══════════════════════════════════════════════
+
+// Define missing CSS variables
+var rootFix = document.createElement('style');
+rootFix.textContent = `
+:root {
+  --purple: #6B21A8;
+  --purplel: #F3E8FF;
+  --orange: #C2410C;
+  --orangel: #FFF7ED;
+}
+/* Make assign + share buttons visible */
+.btn-assign {
+  background: #F3E8FF !important;
+  color: #6B21A8 !important;
+  border-color: #D8B4FE !important;
+}
+.btn-assign:hover { background: #E9D5FF !important; }
+.btn-share {
+  background: #EFF6FF !important;
+  color: #1D4ED8 !important;
+  border-color: #BFDBFE !important;
+}
+.btn-share:hover { background: #DBEAFE !important; }
+`;
+document.head.appendChild(rootFix);
+
+// Robust openAssignModal that doesn't depend on CSS variables
+openAssignModal = function(testId, testName){
+  // Verify modal exists
+  var modal = document.getElementById('mo-assign');
+  if(!modal){
+    showToast('Assignment modal not found. Please refresh.','err');
+    return;
+  }
+  assignTestId = testId;
+  assignTestName = testName;
+  assignMode = 'skill';
+  assignModules = {listening:true, reading:false, writing:false};
+  selectedStudentIds = new Set();
+
+  // Set title
+  var titleEl = document.getElementById('assign-title');
+  if(titleEl) titleEl.textContent = 'Assign: '+testName;
+
+  // Reset mode UI
+  var modeSkill = document.getElementById('mode-skill');
+  var modeFull = document.getElementById('mode-full');
+  if(modeSkill) modeSkill.classList.add('active');
+  if(modeFull) modeFull.classList.remove('active');
+
+  // Reset module toggles
+  ['listening','reading','writing'].forEach(function(m){
+    var cb = document.getElementById('mc-'+m);
+    var tog = document.getElementById('mt-'+m);
+    if(cb){ cb.checked = m==='listening'; }
+    if(tog){ tog.classList.toggle('active', m==='listening'); }
+  });
+
+  // Show modules panel, hide full info
+  var modPanel = document.getElementById('assign-modules');
+  var fullInfo = document.getElementById('assign-full-info');
+  if(modPanel) modPanel.style.display='block';
+  if(fullInfo) fullInfo.style.display='none';
+
+  // Default due date 1 week from now
+  var dueEl = document.getElementById('assign-due');
+  if(dueEl){
+    var due = new Date(); due.setDate(due.getDate()+7);
+    dueEl.value = due.toISOString().split('T')[0];
+  }
+
+  // Open modal first so user sees it loading
+  modal.classList.add('open');
+
+  // Load existing assignment
+  db.collection('assignments')
+    .where('testId','==',testId)
+    .where('teacherId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      if(!snap.empty){
+        var ex = snap.docs[0].data();
+        if(ex.modules) assignModules = ex.modules;
+        if(ex.mode){
+          assignMode = ex.mode;
+          if(modeSkill) modeSkill.classList.toggle('active', ex.mode==='skill');
+          if(modeFull) modeFull.classList.toggle('active', ex.mode==='full');
+          if(modPanel) modPanel.style.display = ex.mode==='skill'?'block':'none';
+          if(fullInfo) fullInfo.style.display = ex.mode==='full'?'block':'none';
+        }
+        if(ex.dueDate && dueEl) dueEl.value = ex.dueDate;
+        if(ex.studentIds) ex.studentIds.forEach(function(id){ selectedStudentIds.add(id); });
+        ['listening','reading','writing'].forEach(function(m){
+          var cb=document.getElementById('mc-'+m);
+          var tog=document.getElementById('mt-'+m);
+          if(cb) cb.checked=assignModules[m];
+          if(tog) tog.classList.toggle('active',assignModules[m]);
+          var pcb=document.getElementById('pause-'+m);
+          if(pcb) pcb.checked=ex['allow_pause_'+m]||false;
+        });
+      }
+      fetchAndShowAssignStudents();
+    })
+    .catch(function(e){
+      console.error('Assignment load error:', e);
+      fetchAndShowAssignStudents();
+    });
+};
+
+// Rebuild loadMyTests with visible buttons
+loadMyTests = function(){
+  db.collection('tests').where('createdBy','==',CU.uid).where('owner','==','teacher').get().then(function(snap){
+    var h='';
+    if(snap.empty){
+      document.getElementById('my-tests').innerHTML='<div style="color:var(--mu);font-size:13px">No tests yet.</div>';
+      return;
+    }
+    snap.forEach(function(d){
+      var t=d.data();
+      var tid=d.id;
+      var isActive=t.status==='active';
+      var tname=(t.name||'Test').replace(/'/g,"\\'");
+      h+='<div class="tc" onclick="openEdit(\''+tid+'\',\'teacher\')">';
+      h+='<div class="ti" style="background:var(--bll)">📋</div>';
+      h+='<div style="flex:1">';
+      h+='<div style="font-size:14px;font-weight:600;margin-bottom:3px">'+t.name+'</div>';
+      h+='<div style="font-size:12px;color:var(--mu)">'+t.type+' · '+t.status+'</div>';
+      h+='</div>';
+      // Classroom button
+      h+='<span class="cm-tag" onclick="event.stopPropagation();openClassroom(\''+tid+'\')">🏫 Classroom</span>';
+      // Share button
+      h+='<button class="btn btn-sm btn-share" style="margin-left:6px" onclick="event.stopPropagation();openShareModal(\''+tid+'\',\''+tname+'\')">🔗 Share</button>';
+      // Assign button
+      h+='<button class="btn btn-sm btn-assign" style="margin-left:6px" onclick="event.stopPropagation();openAssignModal(\''+tid+'\',\''+tname+'\')">👥 Assign</button>';
+      // Active/Draft toggle
+      h+='<button class="btn btn-sm" style="margin-left:6px;background:'+(isActive?'var(--grl)':'var(--bg)')+';color:'+(isActive?'var(--gr)':'var(--mu)')+';border-color:'+(isActive?'var(--gr)':'var(--bm)')+'" onclick="toggleStatus(\''+tid+'\',\''+t.status+'\',event)">'+(isActive?'✓ Active':'○ Draft')+'</button>';
+      // Delete
+      h+='<button class="btn btn-sm btn-d" style="margin-left:4px" onclick="event.stopPropagation();delTest(\''+tid+'\')">🗑</button>';
+      h+='</div>';
+    });
+    document.getElementById('my-tests').innerHTML=h;
+  }).catch(function(e){
+    showToast('Error loading tests: '+e.message,'err');
+  });
+};
+
+console.log('JIC IELTS — assign button + purple CSS fix loaded ✓');
+</script>
