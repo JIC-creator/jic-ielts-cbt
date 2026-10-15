@@ -11269,3 +11269,239 @@ saveAssignment = function(){
 
 console.log('JIC IELTS — assign modal rebuild fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Student portal — assigned tests + start test
+// ═══════════════════════════════════════════════
+
+// Override loadStudent to rebuild student screen properly
+loadStudent = function(d){
+  var name = d.name||'Student';
+  // Update topbar name
+  var nameEl = document.getElementById('s-name');
+  if(nameEl) nameEl.textContent = name;
+  var welEl = document.getElementById('s-wel');
+  if(welEl) welEl.textContent = 'Welcome, '+name+'!';
+  // Rebuild student main content with shome + spick divs
+  var mc = document.querySelector('#s-student .mc');
+  if(mc){
+    mc.innerHTML =
+      '<div id="shome">'+
+        '<div style="font-size:20px;font-weight:700;margin-bottom:4px" id="s-wel2">Welcome, '+name+'!</div>'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:24px">Select a test to begin.</div>'+
+        '<div style="font-size:15px;font-weight:600;margin-bottom:12px">My assigned tests</div>'+
+        '<div id="s-tests"><div style="color:var(--mu);font-size:13px;text-align:center;padding:24px">'+
+          '<div style="font-size:32px;margin-bottom:8px">⏳</div>Loading your tests...'+
+        '</div></div>'+
+        '<div class="dv"></div>'+
+        '<div style="font-size:15px;font-weight:600;margin-bottom:12px">My results</div>'+
+        '<div id="s-results"><div style="color:var(--mu);font-size:13px">No completed tests yet.</div></div>'+
+      '</div>'+
+      '<div id="spick" style="display:none"></div>';
+  }
+  showS('student');
+  loadStudentTests();
+};
+
+// Override loadStudentTests to use correct student ID
+loadStudentTests = function(){
+  if(!CU) return;
+  var el = document.getElementById('s-tests');
+  if(el) el.innerHTML = '<div style="color:var(--mu);font-size:13px;text-align:center;padding:24px"><div style="font-size:32px;margin-bottom:8px">⏳</div>Loading...</div>';
+  db.collection('assignments')
+    .where('studentIds','array-contains',CU.uid)
+    .get()
+    .then(function(snap){
+      if(snap.empty){
+        if(el) el.innerHTML = '<div style="color:var(--mu);font-size:13px;padding:20px;text-align:center">'+
+          '<div style="font-size:32px;margin-bottom:8px">📋</div>'+
+          'No tests assigned to you yet.<br>Your teacher will assign tests when ready.</div>';
+        return;
+      }
+      var tests = [];
+      var pending = snap.size;
+      snap.forEach(function(d){
+        var asgn = d.data();
+        asgn.assignmentId = d.id;
+        db.collection('tests').doc(asgn.testId).get().then(function(td){
+          if(td.exists){
+            var t = Object.assign({id:td.id}, td.data());
+            t.assignment = asgn;
+            tests.push(t);
+          }
+          pending--;
+          if(!pending) rendStudentTests(tests);
+        }).catch(function(){ pending--; if(!pending) rendStudentTests(tests); });
+      });
+    })
+    .catch(function(e){
+      if(el) el.innerHTML = '<div style="color:var(--rd);font-size:13px;padding:16px">Error loading tests: '+e.message+'</div>';
+    });
+};
+
+function rendStudentTests(tests){
+  var el = document.getElementById('s-tests');
+  if(!el) return;
+  if(!tests.length){
+    el.innerHTML = '<div style="color:var(--mu);font-size:13px;padding:20px;text-align:center">'+
+      '<div style="font-size:32px;margin-bottom:8px">📋</div>No tests assigned yet.</div>';
+    return;
+  }
+  // Sort by due date
+  tests.sort(function(a,b){
+    var da=a.assignment&&a.assignment.dueDate||'9999';
+    var db2=b.assignment&&b.assignment.dueDate||'9999';
+    return da<db2?-1:1;
+  });
+  el.innerHTML = tests.map(function(t){
+    var asgn = t.assignment;
+    var modules = asgn.modules||{listening:true,reading:true,writing:true};
+    var dueStr = asgn.dueDate||'';
+    var dueBadge = '';
+    if(dueStr){
+      var due=new Date(dueStr),now=new Date(),diff=Math.ceil((due-now)/(1000*60*60*24));
+      if(diff<0) dueBadge='<span class="due-badge overdue">⚠️ Overdue</span>';
+      else if(diff<=3) dueBadge='<span class="due-badge soon">⏰ Due in '+diff+' day'+(diff===1?'':'s')+'</span>';
+      else dueBadge='<span class="due-badge ok">📅 Due '+due.toLocaleDateString()+'</span>';
+    }
+    var modeTag = asgn.mode==='full'?
+      '<span class="badge b-pu" style="font-size:11px">Full test</span>':
+      '<span class="badge b-bl" style="font-size:11px">Skill practice</span>';
+    // Module tiles
+    var modTiles = ['listening','reading','writing'].map(function(m){
+      var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+      var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+      var avail = modules[m];
+      return '<div style="text-align:center;padding:8px;border-radius:var(--r);border:1px solid var(--b);'+
+        'background:'+(avail?'var(--s)':'var(--bg)')+';opacity:'+(avail?1:.45)+'">'+
+        '<div style="font-size:18px;margin-bottom:2px">'+icons[m]+(avail?'':'🔒')+'</div>'+
+        '<div style="font-size:11px;font-weight:500;color:'+(avail?'var(--t)':'var(--mu)')+'">'+labels[m]+'</div>'+
+        '</div>';
+    }).join('');
+    return '<div class="card" style="margin-bottom:12px">'+
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:10px">'+
+        '<div>'+
+          '<div style="font-size:15px;font-weight:700;margin-bottom:4px">'+t.name+'</div>'+
+          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+
+            '<span style="font-size:12px;color:var(--mu)">'+t.type+'</span>'+
+            modeTag+
+          '</div>'+
+        '</div>'+
+        dueBadge+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">'+
+        modTiles+
+      '</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button class="btn btn-p" style="flex:1" onclick="openTestModulePicker(\''+t.id+'\')">▶ Start test</button>'+
+        '<button class="btn" onclick="openClassroom(\''+t.id+'\')">🏫 Classroom</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  // Store tests for later access
+  window._studentTests = tests;
+}
+
+// Open module picker for a specific test
+function openTestModulePicker(testId){
+  var tests = window._studentTests||[];
+  var t = tests.find(function(x){ return x.id===testId; });
+  if(!t){ showToast('Test not found.','err'); return; }
+  curTid = testId;
+  tdata = t;
+  currentAssignment = t.assignment;
+  // Load content then show picker
+  var el = document.getElementById('s-tests');
+  if(el) el.innerHTML = '<div style="color:var(--mu);font-size:13px;text-align:center;padding:24px"><div style="font-size:32px;margin-bottom:8px">⏳</div>Loading test content...</div>';
+  db.collection('tests').doc(testId).collection('content').doc('data').get().then(function(c){
+    if(!TC) TC = {};
+    if(c.exists) TC[testId] = normalizeTC(c.data());
+    else TC[testId] = {listening:{sections:{}},reading:{passages:{}},writing:{},speaking:{}};
+    // Restore test list then show picker
+    rendStudentTests(window._studentTests||[]);
+    // Show picker
+    showAssignedModulePicker(testId, t, t.assignment);
+  }).catch(function(e){
+    rendStudentTests(window._studentTests||[]);
+    showToast('Error loading test: '+e.message,'err');
+  });
+}
+
+// Override showAssignedModulePicker to ensure shome/spick exist
+showAssignedModulePicker = function(testId, t, asgn){
+  var shome = document.getElementById('shome');
+  var spick = document.getElementById('spick');
+  if(!shome||!spick){
+    showToast('Student screen not ready. Please refresh.','err');
+    return;
+  }
+  var modules = asgn.modules||{listening:true,reading:true,writing:true};
+  var isFullTest = asgn.mode==='full';
+  var dueStr = asgn.dueDate||'';
+  var h = '';
+  // Back button + title
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'+
+    '<button class="btn btn-sm" onclick="backToStudentHome()">← Back</button>'+
+    '<div style="font-size:18px;font-weight:600">'+t.name+'</div>'+
+    (isFullTest?'<span class="badge b-pu">Complete in order</span>':'')+
+  '</div>';
+  // Due date
+  if(dueStr){
+    var due=new Date(dueStr),now=new Date(),diff=Math.ceil((due-now)/(1000*60*60*24));
+    var cls=diff<0?'overdue':diff<=3?'soon':'ok';
+    h += '<div class="due-badge '+cls+'" style="margin-bottom:16px;display:inline-flex;font-size:13px">'+
+      '📅 Due: '+due.toLocaleDateString()+
+      (diff<0?' (Overdue)':diff<=3?' ('+diff+' days left)':'')+
+    '</div>';
+  }
+  // Module cards
+  var modOrder=['listening','reading','writing'];
+  var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+  var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+  var times={
+    listening:t.listeningTime||30,
+    reading:t.readingTime||60,
+    writing:t.writingTime||60
+  };
+  var colors={
+    listening:'var(--bll)',
+    reading:'var(--grl)',
+    writing:'var(--aml)'
+  };
+  h += '<div>';
+  modOrder.forEach(function(m, mi){
+    var avail = modules[m];
+    var allowPause = asgn['allow_pause_'+m]||false;
+    h += '<div class="module-card'+(avail?'':' locked')+'" '+
+      (avail?'onclick="startStudentModule(\''+m+'\')"':'')+
+      ' style="background:'+(avail?colors[m]:'var(--bg)')+'">'+
+      '<div class="mc-icon" style="font-size:24px;background:rgba(255,255,255,.4)">'+icons[m]+(avail?'':'🔒')+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:15px;font-weight:600">'+labels[m]+'</div>'+
+        '<div style="font-size:12px;color:var(--mu);margin-top:2px">'+
+          (avail?
+            times[m]+' min'+(allowPause?' · Can pause':''):
+            'Not available for this assignment')+
+        '</div>'+
+      '</div>'+
+      (avail?
+        '<span class="badge b-gr" style="font-size:12px">Tap to start →</span>':
+        '<span class="badge b-gy" style="font-size:12px">Locked</span>')+
+    '</div>';
+  });
+  h += '</div>';
+  shome.style.display = 'none';
+  spick.style.display = 'block';
+  spick.innerHTML = h;
+};
+
+// Back button
+backToStudentHome = function(){
+  var shome = document.getElementById('shome');
+  var spick = document.getElementById('spick');
+  if(shome) shome.style.display = 'block';
+  if(spick) spick.style.display = 'none';
+};
+
+console.log('JIC IELTS — student portal fix loaded ✓');
+</script>
