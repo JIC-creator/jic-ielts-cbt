@@ -12404,3 +12404,228 @@ doOut = function(){
 
 console.log('JIC IELTS — student bell notifications loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Teacher Results page — wire up correctly
+// ═══════════════════════════════════════════════
+
+// Override tN to call loadTeacherResults when clicking Results
+var _prevTN3 = tN;
+tN = function(page, el){
+  _prevTN3(page, el);
+  if(page==='results'){
+    // Always rebuild the results section fresh
+    var ap = document.getElementById('ta-results');
+    if(ap){
+      ap.innerHTML =
+        '<div style="font-size:18px;font-weight:600;margin-bottom:16px">Student Results</div>'+
+        '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">'+
+          '<select class="inp" id="res-filter-test" style="width:auto" onchange="filterResults()">'+
+            '<option value="">All tests</option>'+
+          '</select>'+
+          '<select class="inp" id="res-filter-mod" style="width:auto" onchange="filterResults()">'+
+            '<option value="">All modules</option>'+
+            '<option value="listening">🎧 Listening</option>'+
+            '<option value="reading">📖 Reading</option>'+
+            '<option value="writing">✏️ Writing</option>'+
+          '</select>'+
+          '<select class="inp" id="res-filter-status" style="width:auto" onchange="filterResults()">'+
+            '<option value="">All statuses</option>'+
+            '<option value="pending">⏳ Pending release</option>'+
+            '<option value="released">✓ Released</option>'+
+          '</select>'+
+          '<button class="btn btn-sm btn-p" onclick="loadTeacherResults()">🔄 Refresh</button>'+
+        '</div>'+
+        '<div id="t-results-list">'+
+          '<div style="text-align:center;padding:32px;color:var(--mu)">'+
+            '<div style="font-size:36px;margin-bottom:8px">⏳</div>Loading results...'+
+          '</div>'+
+        '</div>';
+      loadTeacherResults();
+    }
+  }
+};
+
+// Fix loadTeacherResults to work with the rebuilt div
+loadTeacherResults = function(){
+  var el = document.getElementById('t-results-list');
+  if(!el) return;
+  el.innerHTML =
+    '<div style="text-align:center;padding:32px;color:var(--mu)">'+
+      '<div style="font-size:36px;margin-bottom:8px">⏳</div>Loading results...'+
+    '</div>';
+
+  db.collection('results')
+    .where('teacherId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      window._allResults = [];
+      snap.forEach(function(d){
+        window._allResults.push(Object.assign({id:d.id}, d.data()));
+      });
+      // Sort newest first
+      window._allResults.sort(function(a,b){
+        var ta=a.submittedAt?(a.submittedAt.toDate?a.submittedAt.toDate().getTime():0):0;
+        var tb=b.submittedAt?(b.submittedAt.toDate?b.submittedAt.toDate().getTime():0):0;
+        return tb-ta;
+      });
+      // Populate test filter dropdown
+      var testNames = {};
+      window._allResults.forEach(function(r){
+        if(r.testName&&r.testId) testNames[r.testId]=r.testName;
+      });
+      var filterEl = document.getElementById('res-filter-test');
+      if(filterEl){
+        // Clear existing options except first
+        while(filterEl.options.length>1) filterEl.remove(1);
+        Object.keys(testNames).forEach(function(tid){
+          var opt = document.createElement('option');
+          opt.value=tid; opt.textContent=testNames[tid];
+          filterEl.appendChild(opt);
+        });
+      }
+      if(!window._allResults.length){
+        el.innerHTML =
+          '<div style="text-align:center;padding:32px;color:var(--mu)">'+
+            '<div style="font-size:36px;margin-bottom:8px">📊</div>'+
+            'No results yet. Results will appear here after students submit tests.'+
+          '</div>';
+        return;
+      }
+      filterResults();
+    })
+    .catch(function(e){
+      el.innerHTML =
+        '<div style="color:var(--rd);padding:16px;background:var(--rdl);border-radius:var(--r)">'+
+          '<strong>Error loading results:</strong> '+e.message+'<br><br>'+
+          '<small>If this is a "missing index" error, check the browser console (F12) for a Firebase link to create the index automatically.</small>'+
+        '</div>';
+    });
+};
+
+console.log('JIC IELTS — teacher results page fix loaded ✓');
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Remove orderBy from results query
+//  so no Firestore index is needed
+// ═══════════════════════════════════════════════
+
+loadTeacherResults = function(){
+  var el = document.getElementById('t-results-list');
+  if(!el) return;
+  el.innerHTML =
+    '<div style="text-align:center;padding:32px;color:var(--mu)">'+
+      '<div style="font-size:36px;margin-bottom:8px">⏳</div>Loading results...'+
+    '</div>';
+
+  // No orderBy — avoids needing a composite index
+  db.collection('results')
+    .where('teacherId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      window._allResults = [];
+      snap.forEach(function(d){
+        window._allResults.push(Object.assign({id:d.id}, d.data()));
+      });
+      // Sort newest first in JavaScript instead
+      window._allResults.sort(function(a,b){
+        var ta=a.submittedAt?(a.submittedAt.toDate?a.submittedAt.toDate().getTime():0):0;
+        var tb=b.submittedAt?(b.submittedAt.toDate?b.submittedAt.toDate().getTime():0):0;
+        return tb-ta;
+      });
+      // Populate test filter
+      var testNames = {};
+      window._allResults.forEach(function(r){
+        if(r.testName&&r.testId) testNames[r.testId]=r.testName;
+      });
+      var filterEl = document.getElementById('res-filter-test');
+      if(filterEl){
+        while(filterEl.options.length>1) filterEl.remove(1);
+        Object.keys(testNames).forEach(function(tid){
+          var opt=document.createElement('option');
+          opt.value=tid; opt.textContent=testNames[tid];
+          filterEl.appendChild(opt);
+        });
+      }
+      if(!window._allResults.length){
+        el.innerHTML =
+          '<div style="text-align:center;padding:32px;color:var(--mu)">'+
+            '<div style="font-size:36px;margin-bottom:8px">📊</div>'+
+            'No results yet. Results appear here after students submit tests.'+
+          '</div>';
+        return;
+      }
+      filterResults();
+    })
+    .catch(function(e){
+      el.innerHTML =
+        '<div style="color:var(--rd);padding:16px;background:var(--rdl);border-radius:var(--r)">'+
+          '<strong>Error:</strong> '+e.message+
+        '</div>';
+    });
+};
+
+// Also fix student results query — no orderBy
+loadStudentResults = function(){
+  var el = document.getElementById('s-results');
+  if(!el) return;
+  db.collection('results')
+    .where('studentId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      var results = [];
+      snap.forEach(function(d){ results.push(Object.assign({id:d.id},d.data())); });
+      // Sort newest first in JS
+      results.sort(function(a,b){
+        var ta=a.submittedAt?(a.submittedAt.toDate?a.submittedAt.toDate().getTime():0):0;
+        var tb=b.submittedAt?(b.submittedAt.toDate?b.submittedAt.toDate().getTime():0):0;
+        return tb-ta;
+      });
+      rendStudentResults(results);
+    })
+    .catch(function(e){
+      if(el) el.innerHTML='<div style="color:var(--mu);font-size:13px">Could not load results.</div>';
+    });
+};
+
+// Same for student notifications
+loadSNotifications = function(){
+  if(!CU) return;
+  db.collection('notifications')
+    .where('userId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      sNotifications = [];
+      snap.forEach(function(d){ sNotifications.push(Object.assign({id:d.id},d.data())); });
+      sNotifications.sort(function(a,b){
+        var ta=a.createdAt?(a.createdAt.toDate?a.createdAt.toDate().getTime():0):0;
+        var tb=b.createdAt?(b.createdAt.toDate?b.createdAt.toDate().getTime():0):0;
+        return tb-ta;
+      });
+      rendSNotifications();
+      updSBellBadge();
+    }).catch(function(){});
+};
+
+// Same for teacher notifications
+loadNotifications = function(){
+  if(!CU||CRole!=='teacher') return;
+  db.collection('notifications')
+    .where('teacherId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      notifications=[];
+      snap.forEach(function(d){ notifications.push(Object.assign({id:d.id},d.data())); });
+      notifications.sort(function(a,b){
+        var ta=a.createdAt?(a.createdAt.toDate?a.createdAt.toDate().getTime():0):0;
+        var tb=b.createdAt?(b.createdAt.toDate?b.createdAt.toDate().getTime():0):0;
+        return tb-ta;
+      });
+      rendNotifications();
+      updateBellBadge();
+    }).catch(function(){});
+};
+
+console.log('JIC IELTS — no-index queries loaded ✓');
+</script>
