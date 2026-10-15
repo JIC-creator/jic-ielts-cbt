@@ -10747,3 +10747,197 @@ if(assignMbd){
 
 console.log('JIC IELTS — Stage 2 student test-taking loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Students not showing for teacher
+//  - loadUsers called on teacher login
+//  - My Students section loads correctly
+//  - Assign modal loads all students
+// ═══════════════════════════════════════════════
+
+// Override loadTeacher to always load users
+var _prevLoadTeacher2 = loadTeacher;
+loadTeacher = function(d){
+  _prevLoadTeacher2(d);
+  // Always load users when teacher logs in
+  setTimeout(function(){ loadUsers(); }, 500);
+};
+
+// Override loadUsers to be more robust
+loadUsers = function(){
+  db.collection('users').get().then(function(snap){
+    allUsers = [];
+    snap.forEach(function(d){ allUsers.push(Object.assign({id:d.id}, d.data())); });
+    // Render teacher My Students list
+    rendMyStudents();
+    // Render admin lists
+    if(CRole==='admin'){
+      rendU('teacher');
+      rendU('student');
+    }
+  }).catch(function(e){
+    console.error('loadUsers error:', e);
+    showToast('Error loading users: '+e.message, 'err');
+  });
+};
+
+// Fix My Students section for teacher
+function rendMyStudents(){
+  var el = document.getElementById('ms-list');
+  if(!el) return;
+  var students = allUsers.filter(function(u){ return u.role==='student'; });
+  if(!students.length){
+    el.innerHTML = '<div style="padding:16px;color:var(--mu);font-size:13px">No students registered yet.</div>';
+    return;
+  }
+  el.innerHTML = students.map(function(u){
+    var ini = (u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--b)">'+
+      '<div style="width:36px;height:36px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">'+ini+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:13px;font-weight:500">'+u.name+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+u.email+'</div>'+
+      '</div>'+
+      '<span class="badge b-gr">Student</span>'+
+      '</div>';
+  }).join('');
+}
+
+// Override filtMS to use allUsers properly
+filtMS = function(){
+  var q = (document.getElementById('ms-srch')||{}).value||'';
+  q = q.toLowerCase();
+  var students = allUsers.filter(function(u){
+    return u.role==='student' && (u.name+u.email).toLowerCase().includes(q);
+  });
+  var el = document.getElementById('ms-list');
+  if(!el) return;
+  if(!students.length){
+    el.innerHTML='<div style="padding:16px;color:var(--mu);font-size:13px">No students found.</div>';
+    return;
+  }
+  el.innerHTML = students.map(function(u){
+    var ini=(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--b)">'+
+      '<div style="width:36px;height:36px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">'+ini+'</div>'+
+      '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+u.name+'</div>'+
+      '<div style="font-size:12px;color:var(--mu)">'+u.email+'</div></div>'+
+      '</div>';
+  }).join('');
+};
+
+// Fix openAssignModal to always fetch fresh students
+var _prevOpenAssignModal = openAssignModal;
+openAssignModal = function(testId, testName){
+  assignTestId = testId;
+  assignTestName = testName;
+  assignMode = 'skill';
+  assignModules = {listening:true, reading:false, writing:false};
+  selectedStudentIds = new Set();
+  document.getElementById('assign-title').textContent = 'Assign: '+testName;
+  // Reset UI
+  selAssignMode('skill', document.getElementById('mode-skill'));
+  ['listening','reading','writing'].forEach(function(m){
+    var cb = document.getElementById('mc-'+m);
+    var tog = document.getElementById('mt-'+m);
+    if(cb){ cb.checked = m==='listening'; }
+    if(tog){ tog.classList.toggle('active', m==='listening'); }
+  });
+  // Default due date 1 week from now
+  var due = new Date(); due.setDate(due.getDate()+7);
+  document.getElementById('assign-due').value = due.toISOString().split('T')[0];
+  // Load existing assignment first
+  db.collection('assignments').where('testId','==',testId).where('teacherId','==',CU.uid).get().then(function(snap){
+    if(!snap.empty){
+      var existing = snap.docs[0].data();
+      if(existing.modules) assignModules = existing.modules;
+      if(existing.mode){ assignMode=existing.mode; selAssignMode(existing.mode, document.getElementById('mode-'+existing.mode)); }
+      if(existing.dueDate) document.getElementById('assign-due').value = existing.dueDate;
+      if(existing.studentIds) existing.studentIds.forEach(function(id){ selectedStudentIds.add(id); });
+      // Update module UI
+      ['listening','reading','writing'].forEach(function(m){
+        var cb=document.getElementById('mc-'+m);
+        var tog=document.getElementById('mt-'+m);
+        if(cb) cb.checked=assignModules[m];
+        if(tog) tog.classList.toggle('active',assignModules[m]);
+      });
+      // Pause settings
+      ['listening','reading','writing'].forEach(function(m){
+        var pcb=document.getElementById('pause-'+m);
+        if(pcb) pcb.checked=existing['allow_pause_'+m]||false;
+      });
+    }
+    // Always fetch fresh students from Firestore
+    fetchAndShowAssignStudents();
+  }).catch(function(){
+    fetchAndShowAssignStudents();
+  });
+  openM('assign');
+};
+
+// Always fetch fresh from Firestore — don't rely on allUsers cache
+function fetchAndShowAssignStudents(){
+  var el = document.getElementById('assign-student-list');
+  if(el) el.innerHTML='<div style="padding:12px;color:var(--mu);font-size:13px">Loading students...</div>';
+  db.collection('users').where('role','==','student').get().then(function(snap){
+    allStudentsForAssign = [];
+    snap.forEach(function(d){ allStudentsForAssign.push(Object.assign({id:d.id}, d.data())); });
+    // Update allUsers too
+    snap.forEach(function(d){
+      var exists = allUsers.find(function(u){ return u.id===d.id; });
+      if(!exists) allUsers.push(Object.assign({id:d.id}, d.data()));
+    });
+    rendAssignStudents(allStudentsForAssign);
+    if(!allStudentsForAssign.length){
+      showToast('No students registered yet. Students need to create an account first.','err');
+    }
+  }).catch(function(e){
+    if(el) el.innerHTML='<div style="padding:12px;color:var(--rd);font-size:13px">Error loading students: '+e.message+'</div>';
+  });
+}
+
+// Also fix tN to load users when switching to My Students tab
+var _prevTN = tN;
+tN = function(page, el){
+  _prevTN(page, el);
+  if(page==='students'){
+    // Refresh students list
+    db.collection('users').where('role','==','student').get().then(function(snap){
+      allUsers = allUsers.filter(function(u){ return u.role!=='student'; });
+      snap.forEach(function(d){ allUsers.push(Object.assign({id:d.id},d.data())); });
+      rendMyStudents();
+    });
+  }
+};
+
+// Fix doReg to also update allUsers after registration
+var _prevDoReg = doReg;
+doReg = function(){
+  var nm=document.getElementById('rnm').value.trim();
+  var em=document.getElementById('rem').value.trim();
+  var pw=document.getElementById('rpw').value;
+  var cd=document.getElementById('rcd').value.trim();
+  if(!selRole){showAE('Please select a role.');return;}
+  if(!nm||!em||!pw){showAE('Please fill in all fields.');return;}
+  if(pw.length<6){showAE('Password must be at least 6 characters.');return;}
+  if(selRole==='admin'&&cd!==CODES.admin){showAE('Invalid admin code.');return;}
+  if(selRole==='teacher'&&cd!==CODES.teacher){showAE('Invalid teacher code.');return;}
+  auth.createUserWithEmailAndPassword(em,pw).then(function(c){
+    var userData = {
+      name:nm, email:em, role:selRole,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    return db.collection('users').doc(c.user.uid).set(userData).then(function(){
+      return {uid:c.user.uid, userData:userData};
+    });
+  }).then(function(res){
+    // Add to local allUsers cache immediately
+    allUsers.push(Object.assign({id:res.uid}, res.userData));
+    showToast('Account created! Please sign in.');
+    swTab('login');
+    document.getElementById('lem').value = em;
+  }).catch(function(e){ showAE(e.message); });
+};
+
+console.log('JIC IELTS — student loading fix loaded ✓');
+</script>
