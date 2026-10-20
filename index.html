@@ -15031,3 +15031,519 @@ window.addEventListener('load', function(){
   console.log('JIC IELTS — classroom writing divider loaded ✓');
 });
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  COLLABORATIVE DOCUMENT EDITOR
+//  Replaces messaging approach
+//  Uses Firebase Realtime Database for live sync
+//  Rich text, session dividers, auto-save
+// ═══════════════════════════════════════════════
+
+// ── Add Firebase Realtime Database ──
+// Check if already loaded
+if(!window.firebase||!firebase.database){
+  var rtdbScript = document.createElement('script');
+  rtdbScript.src = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js';
+  document.head.appendChild(rtdbScript);
+}
+
+var docEditorCSS = document.createElement('style');
+docEditorCSS.textContent = `
+/* Document editor */
+.ws-doc-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Formatting toolbar */
+.doc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: var(--s);
+  border-bottom: 1px solid var(--b);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.doc-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--b);
+  margin: 0 4px;
+}
+.doc-fmt-btn {
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--mu);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  transition: all .1s;
+}
+.doc-fmt-btn:hover { background: var(--bg); border-color: var(--bm); color: var(--t); }
+.doc-fmt-btn.active { background: var(--bll); border-color: var(--bl); color: var(--bl); }
+
+/* Document scroll area */
+.doc-scroll {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg);
+  padding: 20px;
+}
+
+/* Document page */
+.doc-page {
+  max-width: 820px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 1px 8px rgba(0,0,0,.1);
+  min-height: calc(100vh - 200px);
+  padding: 40px 60px;
+  position: relative;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #000;
+  font-family: 'Georgia', serif;
+}
+.doc-page:focus { box-shadow: 0 2px 16px rgba(0,0,0,.15); }
+
+/* Session divider in doc */
+.doc-session-div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 20px;
+  user-select: none;
+  contenteditable: false;
+}
+.doc-session-line { flex: 1; height: 1px; background: #e0e0e0; }
+.doc-session-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 20px;
+  background: #fff;
+}
+
+/* Author label */
+.doc-author-label {
+  font-size: 10px;
+  color: #999;
+  margin-bottom: 2px;
+  font-family: sans-serif;
+  user-select: none;
+}
+.doc-author-label.teacher { color: var(--bl); }
+.doc-author-label.student { color: var(--gr); }
+
+/* Sync status */
+.doc-sync-status {
+  font-size: 11px;
+  color: var(--mu);
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.doc-sync-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--mu);
+}
+.doc-sync-dot.synced { background: var(--gr); }
+.doc-sync-dot.syncing { background: var(--am); }
+
+/* Other user cursor indicator */
+.doc-other-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background: var(--gr);
+  vertical-align: middle;
+  animation: blink-cursor 1s infinite;
+  margin: 0 1px;
+}
+@keyframes blink-cursor { 0%,100%{opacity:1} 50%{opacity:0} }
+
+.doc-presence {
+  font-size: 11px;
+  color: var(--mu);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.doc-presence-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--gr);
+}
+`;
+document.head.appendChild(docEditorCSS);
+
+// ── Document editor state ──
+var docState = {
+  workspaceId: null,
+  rtdbRef: null,
+  saveTimeout: null,
+  lastSaved: null,
+  isSaving: false,
+  isOtherOnline: false,
+  content: ''
+};
+
+// ── Override openWorkspace to use doc editor ──
+var _prevOpenWorkspace = openWorkspace;
+openWorkspace = function(studentId, studentName, teacherId, teacherName, subject){
+  wsState.workspaceId = studentId+'_'+subject;
+  wsState.studentId = studentId;
+  wsState.studentName = studentName;
+  wsState.teacherId = teacherId;
+  wsState.teacherName = teacherName;
+  wsState.subject = subject;
+  wsState.userRole = CRole;
+
+  var subj = WS_SUBJECTS[subject]||{icon:'📚',label:subject,badge:''};
+  var isTeacher = CRole==='teacher'||CRole==='admin';
+
+  // Set topbar
+  document.getElementById('ws-title').textContent =
+    isTeacher ? studentName+'\'s Workspace' : 'My '+subj.label+' Class';
+  document.getElementById('ws-subtitle').textContent =
+    isTeacher ? subj.label+' · '+teacherName : 'with '+teacherName;
+  var badge = document.getElementById('ws-subject-badge');
+  badge.textContent = subj.icon+' '+subj.label;
+  badge.className = 'ws-badge '+subj.badge;
+
+  // Setup resizable divider
+  setupWsDivider();
+
+  // Build right panel as document editor
+  buildDocEditor();
+
+  // Load document content
+  docState.workspaceId = wsState.workspaceId;
+  loadDocContent();
+
+  // Setup presence
+  setupDocPresence();
+
+  showS('workspace');
+};
+
+// ── Build document editor in right panel ──
+function buildDocEditor(){
+  var right = document.getElementById('ws-right');
+  if(!right) return;
+
+  var authorName = CRole==='student'?
+    (document.getElementById('s-name')||{}).textContent||'Student':
+    (document.getElementById('t-name')||{}).textContent||'Teacher';
+
+  right.innerHTML =
+    // Toolbar
+    '<div class="doc-toolbar">'+
+      '<button class="doc-fmt-btn" onclick="docFmt(\'bold\')" title="Bold"><strong>B</strong></button>'+
+      '<button class="doc-fmt-btn" onclick="docFmt(\'italic\')" title="Italic"><em>I</em></button>'+
+      '<button class="doc-fmt-btn" onclick="docFmt(\'underline\')" title="Underline"><u>U</u></button>'+
+      '<div class="doc-toolbar-sep"></div>'+
+      '<button class="doc-fmt-btn" onclick="docFmt(\'insertUnorderedList\')" title="Bullet list">• List</button>'+
+      '<button class="doc-fmt-btn" onclick="docFmt(\'insertOrderedList\')" title="Numbered list">1. List</button>'+
+      '<div class="doc-toolbar-sep"></div>'+
+      '<select class="inp" style="height:28px;padding:0 6px;font-size:12px;width:auto" onchange="docFmtSize(this.value)">'+
+        '<option value="3">Normal</option>'+
+        '<option value="4">Large</option>'+
+        '<option value="5">Heading</option>'+
+        '<option value="2">Small</option>'+
+      '</select>'+
+      '<div class="doc-toolbar-sep"></div>'+
+      '<button class="doc-fmt-btn" onclick="insertSessionDivider()" title="Insert session divider">📅 New session</button>'+
+      '<div class="doc-sync-status">'+
+        '<div class="doc-sync-dot synced" id="doc-sync-dot"></div>'+
+        '<span id="doc-sync-text">Saved</span>'+
+      '</div>'+
+      '<div class="doc-toolbar-sep"></div>'+
+      '<div class="doc-presence" id="doc-presence">'+
+        '<div class="doc-presence-dot" style="background:var(--mu)"></div>'+
+        '<span id="doc-presence-text">—</span>'+
+      '</div>'+
+    '</div>'+
+    // Document area
+    '<div class="doc-scroll" id="doc-scroll">'+
+      '<div class="doc-author-label '+CRole+'" style="max-width:820px;margin:8px auto 4px;font-family:sans-serif">'+
+        'Editing as: <strong>'+authorName+'</strong>'+
+      '</div>'+
+      '<div class="doc-page" id="doc-page" '+
+        'contenteditable="true" '+
+        'spellcheck="true" '+
+        'oninput="onDocInput()" '+
+        'onkeydown="onDocKeydown(event)">'+
+        '<p><br></p>'+
+      '</div>'+
+      '<div style="height:40px"></div>'+
+    '</div>';
+}
+
+// ── Load document from Firestore ──
+function loadDocContent(){
+  var wsId = docState.workspaceId;
+  // Ensure workspace exists
+  db.collection('workspaces').doc(wsId).get().then(function(d){
+    if(!d.exists){
+      db.collection('workspaces').doc(wsId).set({
+        studentId: wsState.studentId,
+        studentName: wsState.studentName,
+        teacherId: wsState.teacherId,
+        teacherName: wsState.teacherName,
+        subject: wsState.subject,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    // Load doc content
+    db.collection('workspaces').doc(wsId)
+      .collection('doc').doc('content').get()
+      .then(function(cd){
+        var page = document.getElementById('doc-page');
+        if(!page) return;
+        if(cd.exists && cd.data().html){
+          page.innerHTML = cd.data().html;
+        } else {
+          // Fresh doc — add today's session divider
+          page.innerHTML = buildSessionDividerHTML(1)+
+            '<p style="margin-top:12px"><br></p>';
+          saveDocContent();
+        }
+        // Scroll to bottom
+        setTimeout(function(){
+          var scroll = document.getElementById('doc-scroll');
+          if(scroll) scroll.scrollTop = scroll.scrollHeight;
+          // Focus at end
+          if(page){
+            page.focus();
+            var range = document.createRange();
+            range.selectNodeContents(page);
+            range.collapse(false);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }, 100);
+      });
+  }).catch(function(e){
+    showToast('Error loading workspace: '+e.message,'err');
+  });
+
+  // Listen for real-time changes from the other user
+  if(docState.rtdbRef) docState.rtdbRef.off();
+  // Use Firestore real-time listener
+  docState.rtdbRef = db.collection('workspaces').doc(wsId)
+    .collection('doc').doc('content')
+    .onSnapshot(function(snap){
+      if(!snap.exists) return;
+      var data = snap.data();
+      // Only update if change came from other user
+      if(data.lastEditedBy && data.lastEditedBy !== CU.uid){
+        var page = document.getElementById('doc-page');
+        if(!page) return;
+        // Save cursor position
+        var sel = window.getSelection();
+        var cursorOffset = 0;
+        if(sel&&sel.rangeCount>0){
+          var range = sel.getRangeAt(0);
+          var preRange = document.createRange();
+          preRange.selectNodeContents(page);
+          preRange.setEnd(range.endContainer, range.endOffset);
+          cursorOffset = preRange.toString().length;
+        }
+        // Update content
+        page.innerHTML = data.html||'<p><br></p>';
+        // Show sync status
+        setSyncStatus('synced','Synced');
+      }
+    });
+}
+
+// ── Save document ──
+function saveDocContent(){
+  var page = document.getElementById('doc-page');
+  if(!page||!docState.workspaceId) return;
+  setSyncStatus('syncing','Saving...');
+  db.collection('workspaces').doc(docState.workspaceId)
+    .collection('doc').doc('content')
+    .set({
+      html: page.innerHTML,
+      lastEditedBy: CU.uid,
+      lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
+    })
+    .then(function(){
+      var now = new Date();
+      var timeStr = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      setSyncStatus('synced','Saved '+timeStr);
+      docState.lastSaved = now;
+    })
+    .catch(function(e){
+      setSyncStatus('error','Save failed');
+      console.error('Doc save error:',e);
+    });
+}
+
+function setSyncStatus(state, text){
+  var dot = document.getElementById('doc-sync-dot');
+  var txt = document.getElementById('doc-sync-text');
+  if(dot) dot.className = 'doc-sync-dot '+(state==='synced'?'synced':state==='syncing'?'syncing':'');
+  if(txt) txt.textContent = text;
+}
+
+// ── Auto-save on input ──
+function onDocInput(){
+  // Debounce save — save 1.5 seconds after typing stops
+  clearTimeout(docState.saveTimeout);
+  setSyncStatus('syncing','Typing...');
+  docState.saveTimeout = setTimeout(function(){
+    saveDocContent();
+  }, 1500);
+}
+
+function onDocKeydown(e){
+  // Tab key — insert spaces instead of leaving editor
+  if(e.key==='Tab'){
+    e.preventDefault();
+    document.execCommand('insertHTML',false,'&nbsp;&nbsp;&nbsp;&nbsp;');
+  }
+}
+
+// ── Formatting ──
+function docFmt(cmd){
+  var page = document.getElementById('doc-page');
+  if(!page) return;
+  page.focus();
+  document.execCommand(cmd, false, null);
+  onDocInput();
+}
+
+function docFmtSize(size){
+  var page = document.getElementById('doc-page');
+  if(!page) return;
+  page.focus();
+  document.execCommand('fontSize', false, size);
+  onDocInput();
+}
+
+// ── Insert session divider ──
+function buildSessionDividerHTML(sessionNum){
+  var now = new Date();
+  var dateStr = now.toLocaleDateString('en-US',{
+    weekday:'long',year:'numeric',month:'long',day:'numeric'
+  });
+  return '<div class="doc-session-div" contenteditable="false">'+
+    '<div class="doc-session-line"></div>'+
+    '<div class="doc-session-label">📅 Session '+sessionNum+' — '+dateStr+'</div>'+
+    '<div class="doc-session-line"></div>'+
+  '</div>';
+}
+
+function insertSessionDivider(){
+  var page = document.getElementById('doc-page');
+  if(!page) return;
+  // Count existing sessions
+  var existing = page.querySelectorAll('.doc-session-div').length;
+  var num = existing+1;
+  var divHTML = buildSessionDividerHTML(num);
+  page.focus();
+  document.execCommand('insertHTML', false, divHTML+'<p><br></p>');
+  // Scroll to bottom
+  var scroll = document.getElementById('doc-scroll');
+  if(scroll) setTimeout(function(){ scroll.scrollTop=scroll.scrollHeight; },50);
+  onDocInput();
+  showToast('📅 Session '+num+' started!');
+}
+
+// ── Presence ──
+function setupDocPresence(){
+  // Simple presence using Firestore
+  var wsId = docState.workspaceId;
+  var presenceRef = db.collection('workspaces').doc(wsId)
+    .collection('presence').doc(CU.uid);
+  // Set self as online
+  presenceRef.set({
+    userId: CU.uid,
+    name: CRole==='student'?
+      (document.getElementById('s-name')||{}).textContent:
+      (document.getElementById('t-name')||{}).textContent,
+    role: CRole,
+    online: true,
+    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  // Listen for other user's presence
+  db.collection('workspaces').doc(wsId)
+    .collection('presence')
+    .onSnapshot(function(snap){
+      var others = [];
+      snap.forEach(function(d){
+        if(d.id!==CU.uid && d.data().online){
+          others.push(d.data());
+        }
+      });
+      var presEl = document.getElementById('doc-presence');
+      var presText = document.getElementById('doc-presence-text');
+      var presDot = presEl&&presEl.querySelector('.doc-presence-dot');
+      if(others.length){
+        if(presText) presText.textContent = others[0].name+' is here';
+        if(presDot) presDot.style.background = 'var(--gr)';
+      } else {
+        if(presText) presText.textContent = 'Only you';
+        if(presDot) presDot.style.background = 'var(--mu)';
+      }
+    });
+  // Set offline when leaving
+  window.addEventListener('beforeunload', function(){
+    presenceRef.update({online:false});
+  });
+}
+
+// ── Override exitWorkspace ──
+exitWorkspace = function(){
+  // Set offline
+  if(docState.workspaceId&&CU){
+    db.collection('workspaces').doc(docState.workspaceId)
+      .collection('presence').doc(CU.uid)
+      .update({online:false}).catch(function(){});
+  }
+  // Stop listener
+  if(docState.rtdbRef&&docState.rtdbRef.off) docState.rtdbRef.off();
+  else if(docState.rtdbRef) docState.rtdbRef(); // unsubscribe function
+  // Clear state
+  clearTimeout(docState.saveTimeout);
+  docState = {workspaceId:null,rtdbRef:null,saveTimeout:null,lastSaved:null,isSaving:false,content:''};
+  wsState = {workspaceId:null,studentId:null,studentName:null,
+    teacherId:null,teacherName:null,subject:null,
+    userRole:null,currentSession:null,entries:[]};
+  if(CRole==='student') showS('student');
+  else showS('teacher');
+};
+
+// Also override newWsSession button
+window.newWsSession = function(){
+  insertSessionDivider();
+};
+
+console.log('JIC IELTS — collaborative document editor loaded ✓');
+</script>
