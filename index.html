@@ -13921,3 +13921,144 @@ rendMyStudents = function(){
 
 console.log('JIC IELTS — Workspace foundation loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Workspace navigation for teacher + student
+// ═══════════════════════════════════════════════
+
+// Override tN to call rendMyStudents when clicking My Students
+var _prevTN4 = tN;
+tN = function(page, el){
+  _prevTN4(page, el);
+  if(page==='students'){
+    // Refresh students with workspace buttons
+    db.collection('users').where('role','==','student').get().then(function(snap){
+      allUsers = allUsers.filter(function(u){ return u.role!=='student'; });
+      snap.forEach(function(d){ allUsers.push(Object.assign({id:d.id},d.data())); });
+      rendMyStudents();
+    });
+  }
+};
+
+// Final definitive rendMyStudents with workspace buttons
+rendMyStudents = function(){
+  var el = document.getElementById('ms-list');
+  if(!el) return;
+  var students = allUsers.filter(function(u){ return u.role==='student'; });
+  if(!students.length){
+    el.innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--mu);font-size:13px">'+
+        '<div style="font-size:32px;margin-bottom:8px">👥</div>'+
+        'No students registered yet.</div>';
+    return;
+  }
+  el.innerHTML = students.map(function(u){
+    var ini=(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    var tname = (document.getElementById('t-name')||{}).textContent||'Teacher';
+    return '<div style="border:1px solid var(--b);border-radius:var(--rl);margin-bottom:10px;overflow:hidden">'+
+      // Student info row
+      '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--s)">'+
+        '<div style="width:40px;height:40px;border-radius:50%;background:var(--bll);color:var(--bl);'+
+          'display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">'+ini+'</div>'+
+        '<div style="flex:1">'+
+          '<div style="font-size:14px;font-weight:600">'+u.name+'</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+u.email+'</div>'+
+        '</div>'+
+        '<span class="badge b-gr">Student</span>'+
+      '</div>'+
+      // Workspace buttons
+      '<div style="padding:10px 16px;background:var(--bg);border-top:1px solid var(--b)">'+
+        '<div style="font-size:11px;color:var(--mu);margin-bottom:8px;font-weight:500">OPEN CLASSROOM WORKSPACE</div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+          ['listening','reading','writing','speaking'].map(function(subj){
+            var icons={listening:'🎧',reading:'📖',writing:'✏️',speaking:'🎙'};
+            var labels={listening:'Listening',reading:'Reading',writing:'Writing',speaking:'Speaking'};
+            return '<button class="btn btn-sm" style="font-size:12px;padding:6px 14px" '+
+              'onclick="openWorkspace(\''+u.id+'\',\''+escHTMLCm(u.name)+'\',\''+CU.uid+'\',\''+escHTMLCm(tname)+'\',\''+subj+'\')">'+
+              icons[subj]+' '+labels[subj]+'</button>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+};
+
+// Fix student classes — rebuild shome properly and add classes section
+var _prevLoadStudent5 = loadStudent;
+loadStudent = function(d){
+  _prevLoadStudent5(d);
+  setTimeout(function(){
+    addStudentClassesSection();
+    loadStudentClasses();
+    loadStudentResults();
+  }, 500);
+};
+
+function addStudentClassesSection(){
+  var shome = document.getElementById('shome');
+  if(!shome) return;
+  if(document.getElementById('s-classes-section')) return;
+  // Find where to insert — after assigned tests, before results
+  var classSection = document.createElement('div');
+  classSection.id = 's-classes-section';
+  classSection.style.marginBottom = '24px';
+  classSection.innerHTML =
+    '<div style="font-size:15px;font-weight:600;margin-bottom:12px">📚 My classes</div>'+
+    '<div id="s-classes-list">'+
+      '<div style="color:var(--mu);font-size:13px;padding:12px 0">Loading classes...</div>'+
+    '</div>';
+  // Insert before the first divider or at end
+  var firstDv = shome.querySelector('.dv');
+  if(firstDv) shome.insertBefore(classSection, firstDv);
+  else shome.appendChild(classSection);
+}
+
+// Final definitive loadStudentClasses
+loadStudentClasses = function(){
+  var el = document.getElementById('s-classes-list');
+  if(!el) return;
+  db.collection('workspaces')
+    .where('studentId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      if(snap.empty){
+        el.innerHTML =
+          '<div style="color:var(--mu);font-size:13px;padding:12px;background:var(--bg);border-radius:var(--r)">'+
+            'No classes yet. Your teacher will open your workspace during class.</div>';
+        return;
+      }
+      var icons={listening:'🎧',reading:'📖',writing:'✏️',speaking:'🎙'};
+      var labels={listening:'Listening',reading:'Reading',writing:'Writing',speaking:'Speaking'};
+      var colors={
+        listening:'var(--bll)',reading:'var(--grl)',
+        writing:'var(--aml)',speaking:'#F3E8FF'
+      };
+      var textColors={
+        listening:'var(--bl)',reading:'var(--gr)',
+        writing:'var(--am)',speaking:'#6B21A8'
+      };
+      var h='';
+      snap.forEach(function(d){
+        var ws = d.data();
+        var subj = ws.subject||'listening';
+        h += '<div class="class-card" '+
+          'onclick="openWorkspace(\''+ws.studentId+'\',\''+escHTMLCm(ws.studentName||'')+'\',\''+ws.teacherId+'\',\''+escHTMLCm(ws.teacherName||'')+'\',\''+subj+'\')">'+
+          '<div class="class-icon" style="background:'+colors[subj]+';color:'+textColors[subj]+'">'+
+            (icons[subj]||'📚')+
+          '</div>'+
+          '<div style="flex:1">'+
+            '<div style="font-size:14px;font-weight:600">'+(labels[subj]||subj)+'</div>'+
+            '<div style="font-size:12px;color:var(--mu)">with '+(ws.teacherName||'Teacher')+'</div>'+
+          '</div>'+
+          '<span style="font-size:12px;color:var(--mu)">Open →</span>'+
+        '</div>';
+      });
+      el.innerHTML = h;
+    })
+    .catch(function(e){
+      if(el) el.innerHTML='<div style="color:var(--mu);font-size:13px">Could not load classes.</div>';
+    });
+};
+
+console.log('JIC IELTS — workspace navigation fix loaded ✓');
+</script>
