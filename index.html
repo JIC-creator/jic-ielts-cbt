@@ -14414,3 +14414,134 @@ function setupWtDivider(){
 
 console.log('JIC IELTS — Writing test real IELTS CBT layout loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Writing preview + classroom — IELTS CBT layout
+// ═══════════════════════════════════════════════
+
+// Override buildPrevWriting for teacher preview
+buildPrevWriting = function(){
+  var tc = getTC();
+  if(!tc) return '<div style="padding:24px;color:var(--mu)">No writing content loaded.</div>';
+  var w = tc.writing;
+  if(!w||(!w.task1&&!w.task2))
+    return '<div style="padding:24px;color:var(--mu)">No writing tasks set up yet.</div>';
+
+  // Build same split screen layout as student test
+  function buildTask(task, taskData, minWords){
+    var h = '<div style="display:flex;height:calc(50vh - 60px);min-height:300px;border:1px solid var(--b);border-radius:var(--r);overflow:hidden;margin-bottom:16px">';
+    // Left — prompt
+    h += '<div style="width:50%;overflow-y:auto;padding:20px 24px;background:var(--s);border-right:1px solid var(--b);font-size:14px;line-height:1.8;flex-shrink:0">';
+    h += '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;color:var(--mu)">Writing Task '+task+'</div>';
+    if(taskData&&taskData.prompt){
+      taskData.prompt.split('\n').forEach(function(line){
+        if(line.trim()) h+='<p style="margin-bottom:10px">'+renderBold(line)+'</p>';
+      });
+    } else {
+      h+='<p style="color:var(--mu)">No prompt set.</p>';
+    }
+    if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+      h+='<img src="'+taskData.image+'" style="max-width:100%;border-radius:var(--r);border:1px solid var(--b);margin-top:8px;cursor:zoom-in" onclick="openLB(this.src)">';
+    }
+    h+='</div>';
+    // Right — answer area
+    h+='<div style="flex:1;display:flex;flex-direction:column;background:#fff">';
+    h+='<div style="padding:8px 14px;background:var(--bg);border-bottom:1px solid var(--b);font-size:12px;font-weight:600;color:var(--mu)">Part '+task+' Answer</div>';
+    h+='<textarea style="flex:1;border:none;outline:none;padding:16px;font-size:14px;font-family:Georgia,serif;line-height:1.8;resize:none;background:#fff;color:#000" '+
+      'placeholder="Enter your part '+task+' answer..." '+
+      'oninput="updWCount(this,\'prev-wc-'+task+'\','+minWords+')"></textarea>';
+    h+='<div style="padding:6px 14px;background:var(--bg);border-top:1px solid var(--b);display:flex;justify-content:space-between;align-items:center">';
+    if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+      h+='<button class="wt-img-to-text" onclick="openLB(\''+taskData.image+'\')">🔍 Image to Text</button>';
+    } else {
+      h+='<span></span>';
+    }
+    h+='<span id="prev-wc-'+task+'" style="font-size:12px;color:var(--mu)">Word Count: 0 / min '+minWords+'</span>';
+    h+='</div></div></div>';
+    return h;
+  }
+
+  var h = '<div class="prev-full" style="padding:0">';
+  // Instruction
+  h += '<div style="padding:10px 20px;background:var(--bll);border-bottom:1px solid var(--blm);font-size:13px;color:#0C447C;margin-bottom:16px">'+
+    '⏱ Task 1: ~20 minutes (min '+(w.task1&&w.task1.minWords||150)+' words) &nbsp;·&nbsp; '+
+    'Task 2: ~40 minutes (min '+(w.task2&&w.task2.minWords||250)+' words)</div>';
+  h += '<div style="padding:0 16px">';
+  // Task 1
+  if(w.task1){
+    h += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--mu)">TASK 1</div>';
+    h += buildTask(1, w.task1, w.task1.minWords||150);
+  }
+  // Task 2
+  if(w.task2){
+    h += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--mu)">TASK 2</div>';
+    h += buildTask(2, w.task2, w.task2.minWords||250);
+  }
+  h += '</div></div>';
+  return h;
+};
+
+// Word count helper for preview
+function updWCount(ta, elId, min){
+  var count = ta.value.trim()===''?0:ta.value.trim().split(/\s+/).length;
+  var el = document.getElementById(elId);
+  if(!el) return;
+  var ok = count>=min;
+  el.textContent = 'Word Count: '+count+' / min '+min+(ok?' ✓':'');
+  el.style.color = ok?'var(--gr)':'var(--mu)';
+}
+
+// Override renderCMWriting for classroom mode
+renderCMWriting = function(){
+  var w = cmTestContent&&cmTestContent.writing;
+  var el = document.getElementById('cm-writing-content');
+  if(!el) return;
+  if(!w||(!w.task1&&!w.task2)){
+    el.innerHTML='<div style="color:var(--mu);font-size:13px">No writing content loaded.</div>';
+    return;
+  }
+
+  function buildCMTask(task, taskData, minWords){
+    var h='<div style="margin-bottom:20px">';
+    h+='<div style="font-size:13px;font-weight:700;color:#7EB8F7;margin-bottom:10px;padding:6px 12px;background:rgba(126,184,247,.1);border-radius:var(--r);display:inline-block">Task '+task+'</div>';
+    // Split screen
+    h+='<div style="display:flex;height:400px;border:1px solid rgba(255,255,255,.1);border-radius:var(--r);overflow:hidden">';
+    // Left — prompt
+    h+='<div style="width:50%;overflow-y:auto;padding:20px;background:#0f0f23;color:#ddd;font-size:14px;line-height:1.8;border-right:1px solid rgba(255,255,255,.08);flex-shrink:0">';
+    h+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;color:#888">Writing Task '+task+'</div>';
+    if(taskData&&taskData.prompt){
+      taskData.prompt.split('\n').forEach(function(line){
+        if(line.trim()) h+='<p style="margin-bottom:10px">'+renderBold(line)+'</p>';
+      });
+    }
+    if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+      h+='<img src="'+taskData.image+'" style="max-width:100%;border-radius:var(--r);margin-top:8px;cursor:zoom-in" onclick="openLB(this.src)">';
+    }
+    h+='</div>';
+    // Right — answer
+    h+='<div style="flex:1;display:flex;flex-direction:column;background:#fff">';
+    h+='<div style="padding:8px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;font-size:12px;font-weight:600;color:#666">Part '+task+' Answer</div>';
+    h+='<textarea style="flex:1;border:none;outline:none;padding:16px;font-size:14px;font-family:Georgia,serif;line-height:1.8;resize:none;background:#fff;color:#000" '+
+      'placeholder="Write Task '+task+' answer here..." '+
+      'oninput="updWCount(this,\'cm-wc-'+task+'\','+minWords+')"></textarea>';
+    h+='<div style="padding:6px 14px;background:#f5f5f5;border-top:1px solid #ddd;display:flex;justify-content:space-between">';
+    if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+      h+='<button class="wt-img-to-text" onclick="openLB(\''+taskData.image+'\')">🔍 Image to Text</button>';
+    } else { h+='<span></span>'; }
+    h+='<span id="cm-wc-'+task+'" style="font-size:12px;color:#999">Word Count: 0 / min '+minWords+'</span>';
+    h+='</div></div></div></div>';
+    return h;
+  }
+
+  var h='<div style="max-width:1100px;margin:0 auto;padding:20px">';
+  h+='<div style="padding:10px 16px;background:var(--bll);border-radius:var(--r);font-size:13px;color:#0C447C;margin-bottom:20px">'+
+    '⏱ Task 1: ~20 min (min '+(w.task1&&w.task1.minWords||150)+' words) &nbsp;·&nbsp; '+
+    'Task 2: ~40 min (min '+(w.task2&&w.task2.minWords||250)+' words)</div>';
+  if(w.task1) h+=buildCMTask(1,w.task1,w.task1.minWords||150);
+  if(w.task2) h+=buildCMTask(2,w.task2,w.task2.minWords||250);
+  h+='</div>';
+  el.innerHTML=h;
+};
+
+console.log('JIC IELTS — writing preview + classroom layout fix loaded ✓');
+</script>
