@@ -14062,3 +14062,355 @@ loadStudentClasses = function(){
 
 console.log('JIC IELTS — workspace navigation fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  WRITING TEST — Real IELTS CBT layout
+//  Split screen: prompt left, answer right
+//  Part tabs at bottom, resizable divider
+// ═══════════════════════════════════════════════
+
+var writingCSS = document.createElement('style');
+writingCSS.textContent = `
+/* Writing test layout */
+.wt-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+/* Instruction bar */
+.wt-instruction {
+  background: var(--s);
+  border-bottom: 1px solid var(--b);
+  padding: 8px 20px;
+  font-size: 13px;
+  color: var(--mu);
+  flex-shrink: 0;
+}
+.wt-instruction strong { color: var(--t); }
+/* Split screen */
+.wt-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Left — prompt side */
+.wt-left {
+  width: 50%;
+  overflow-y: auto;
+  padding: 24px 28px;
+  background: var(--s);
+  font-size: 14px;
+  line-height: 1.8;
+  flex-shrink: 0;
+}
+.wt-left h3 {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 16px;
+  color: var(--t);
+}
+.wt-left p { margin-bottom: 12px; color: var(--t); }
+.wt-left img {
+  max-width: 100%;
+  border-radius: var(--r);
+  border: 1px solid var(--b);
+  margin: 12px 0;
+  cursor: zoom-in;
+}
+/* Divider */
+.wt-divider {
+  width: 6px;
+  background: var(--b);
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  transition: background .15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+.wt-divider:hover, .wt-divider.dragging { background: var(--bl); }
+.wt-divider-handle {
+  width: 20px;
+  height: 28px;
+  background: var(--bm);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--mu);
+  cursor: col-resize;
+  border: 1px solid var(--b);
+}
+.wt-divider:hover .wt-divider-handle { background: var(--bl); color: #fff; border-color: var(--bl); }
+/* Right — answer side */
+.wt-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.wt-answer-header {
+  padding: 10px 16px;
+  background: var(--s);
+  border-bottom: 1px solid var(--b);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mu);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.wt-textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 20px;
+  font-size: 14px;
+  font-family: 'Georgia', serif;
+  line-height: 1.8;
+  background: #fff;
+  color: #000;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.wt-textarea::placeholder { color: #aaa; font-family: inherit; }
+.wt-answer-footer {
+  padding: 8px 16px;
+  background: var(--s);
+  border-top: 1px solid var(--b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.wt-word-count { font-size: 12px; color: var(--mu); }
+.wt-word-count.ok { color: var(--gr); font-weight: 600; }
+.wt-word-count.low { color: var(--mu); }
+.wt-img-to-text {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--bm);
+  border-radius: var(--r);
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--mu);
+  font-family: inherit;
+}
+.wt-img-to-text:hover { border-color: var(--bl); color: var(--bl); }
+/* Bottom tabs */
+.wt-bottom-tabs {
+  display: flex;
+  border-top: 1px solid var(--b);
+  background: var(--s);
+  flex-shrink: 0;
+}
+.wt-tab {
+  flex: 1;
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mu);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  border-top: 2px solid transparent;
+  transition: all .15s;
+}
+.wt-tab:hover { color: var(--t); background: var(--bg); }
+.wt-tab.active {
+  color: var(--bl);
+  font-weight: 700;
+  border-top-color: var(--bl);
+  background: var(--bll);
+}
+.wt-tab.has-content { color: var(--gr); }
+.wt-tab.has-content.active { color: var(--bl); }
+`;
+document.head.appendChild(writingCSS);
+
+// Override renderWritingTest to use new layout
+renderWritingTest = function(body){
+  var tc = testState.testContent;
+  var w = tc&&tc.writing;
+  var task = testState.curTask||1;
+  var taskData = task===1?(w&&w.task1):(w&&w.task2);
+  var minWords = taskData&&taskData.minWords||(task===1?150:250);
+  var savedAnswer = testState.answers['w'+task]||'';
+  var wc = countWords2(savedAnswer);
+
+  body.style.overflow='hidden';
+  body.innerHTML='';
+
+  var shell = document.createElement('div');
+  shell.className = 'wt-shell';
+
+  // Instruction bar
+  var instrBar = document.createElement('div');
+  instrBar.className = 'wt-instruction';
+  instrBar.innerHTML = '<strong>Part '+task+'</strong> &nbsp;·&nbsp; '+
+    'You should spend about '+(task===1?'20':'40')+' minutes on this task. '+
+    'Write at least <strong>'+minWords+' words</strong>.';
+  shell.appendChild(instrBar);
+
+  // Split screen
+  var split = document.createElement('div');
+  split.className = 'wt-split';
+  split.id = 'wt-split';
+
+  // Left — prompt
+  var left = document.createElement('div');
+  left.className = 'wt-left';
+  left.id = 'wt-left';
+  var leftHTML = '<h3>Writing Task '+task+'</h3>';
+  // Prompt text
+  if(taskData&&taskData.prompt){
+    var lines = taskData.prompt.split('\n');
+    lines.forEach(function(line){
+      if(line.trim()) leftHTML+='<p>'+renderBold(line)+'</p>';
+    });
+  } else {
+    leftHTML+='<p style="color:var(--mu)">No prompt set for this task.</p>';
+  }
+  // Image
+  if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+    leftHTML+='<img src="'+taskData.image+'" onclick="openLB(this.src)" title="Click to enlarge">';
+  }
+  left.innerHTML = leftHTML;
+
+  // Divider
+  var divider = document.createElement('div');
+  divider.className = 'wt-divider';
+  divider.id = 'wt-divider';
+  divider.title = 'Drag to resize';
+  var handle = document.createElement('div');
+  handle.className = 'wt-divider-handle';
+  handle.innerHTML = '↔';
+  divider.appendChild(handle);
+
+  // Right — answer
+  var right = document.createElement('div');
+  right.className = 'wt-right';
+
+  // Answer header
+  var ansHdr = document.createElement('div');
+  ansHdr.className = 'wt-answer-header';
+  ansHdr.innerHTML = '<span>Part '+task+' Answer</span>';
+  right.appendChild(ansHdr);
+
+  // Textarea
+  var ta = document.createElement('textarea');
+  ta.className = 'wt-textarea';
+  ta.id = 'wt-answer-'+task;
+  ta.placeholder = 'Enter your part '+task+' answer...';
+  ta.value = savedAnswer;
+  ta.oninput = function(){
+    testState.answers['w'+task] = this.value;
+    var count = countWords2(this.value);
+    var wcEl = document.getElementById('wt-wc-'+task);
+    if(wcEl){
+      wcEl.textContent = 'Word Count: '+count;
+      wcEl.className = 'wt-word-count'+(count>=minWords?' ok':' low');
+    }
+    autoSaveProgress();
+  };
+  right.appendChild(ta);
+
+  // Answer footer
+  var ansFooter = document.createElement('div');
+  ansFooter.className = 'wt-answer-footer';
+
+  // Image to text button (for Task 1 with image)
+  if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+    var imgToText = document.createElement('button');
+    imgToText.className = 'wt-img-to-text';
+    imgToText.innerHTML = '🔍 Image to Text';
+    imgToText.title = 'Open image in full screen';
+    imgToText.onclick = function(){
+      openLB(taskData.image);
+    };
+    ansFooter.appendChild(imgToText);
+  } else {
+    ansFooter.appendChild(document.createElement('span'));
+  }
+
+  // Word count
+  var wcSpan = document.createElement('span');
+  wcSpan.id = 'wt-wc-'+task;
+  wcSpan.className = 'wt-word-count'+(wc>=minWords?' ok':' low');
+  wcSpan.textContent = 'Word Count: '+wc;
+  ansFooter.appendChild(wcSpan);
+  right.appendChild(ansFooter);
+
+  split.appendChild(left);
+  split.appendChild(divider);
+  split.appendChild(right);
+  shell.appendChild(split);
+
+  // Bottom tabs
+  var bottomTabs = document.createElement('div');
+  bottomTabs.className = 'wt-bottom-tabs';
+  [1,2].forEach(function(t){
+    var tab = document.createElement('button');
+    tab.className = 'wt-tab'+(t===task?' active':'')+(testState.answers['w'+t]?' has-content':'');
+    tab.textContent = 'Part '+t;
+    tab.onclick = function(){
+      // Save current answer before switching
+      var curTa = document.getElementById('wt-answer-'+task);
+      if(curTa) testState.answers['w'+task]=curTa.value;
+      testState.curTask=t;
+      renderTestModule();
+    };
+    bottomTabs.appendChild(tab);
+  });
+  shell.appendChild(bottomTabs);
+
+  body.appendChild(shell);
+
+  // Setup resizable divider
+  setupWtDivider();
+
+  // Focus textarea
+  setTimeout(function(){ ta.focus(); },100);
+
+  // Hide bottom nav bar and flag button for writing
+  document.getElementById('test-nav-bar').style.display='none';
+  document.getElementById('test-flag-btn').style.display='none';
+};
+
+function setupWtDivider(){
+  var divider = document.getElementById('wt-divider');
+  var left = document.getElementById('wt-left');
+  var split = document.getElementById('wt-split');
+  if(!divider||!left||!split) return;
+  var dragging=false;
+  divider.onmousedown=function(e){
+    dragging=true;
+    divider.classList.add('dragging');
+    e.preventDefault();
+  };
+  document.onmousemove=function(e){
+    if(!dragging) return;
+    var rect=split.getBoundingClientRect();
+    var pct=((e.clientX-rect.left)/rect.width*100);
+    pct=Math.max(25,Math.min(75,pct));
+    left.style.width=pct+'%';
+  };
+  document.onmouseup=function(){
+    if(dragging){dragging=false;divider.classList.remove('dragging');}
+  };
+}
+
+console.log('JIC IELTS — Writing test real IELTS CBT layout loaded ✓');
+</script>
