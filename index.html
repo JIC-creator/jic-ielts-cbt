@@ -13030,3 +13030,894 @@ rendStudentResults = function(results){
 
 console.log('JIC IELTS — score always out of 40 loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  WORKSPACE FOUNDATION
+//  Per student per subject digital classroom
+//  Split screen: content left, notebook right
+//  Session dividers, live notebook, Firebase sync
+// ═══════════════════════════════════════════════
+
+// ── CSS ──
+var wsCSS = document.createElement('style');
+wsCSS.textContent = `
+/* Workspace screen */
+#s-workspace {
+  height: 100vh;
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+}
+#s-workspace.active { display: flex; }
+
+/* Workspace topbar */
+.ws-topbar {
+  background: #1e1e2e;
+  color: #fff;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.ws-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+.ws-subtitle {
+  font-size: 12px;
+  color: #888;
+  margin-top: 2px;
+}
+.ws-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+.ws-online {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #888;
+}
+.ws-online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #888;
+  flex-shrink: 0;
+}
+.ws-online-dot.online { background: #1d9e75; }
+
+/* Split screen */
+.ws-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.ws-left {
+  width: 50%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,.08);
+  background: #13131f;
+  overflow: hidden;
+}
+.ws-left-toolbar {
+  background: #1a1a2e;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.ws-left-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  color: #ddd;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.ws-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--s);
+  overflow: hidden;
+}
+.ws-right-toolbar {
+  background: var(--bg);
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--b);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.ws-notebook {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+.ws-notebook-inner {
+  min-height: 100%;
+  padding: 20px;
+}
+
+/* Divider */
+.ws-divider {
+  width: 6px;
+  background: rgba(255,255,255,.05);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background .15s;
+  position: relative;
+  z-index: 5;
+}
+.ws-divider:hover, .ws-divider.dragging {
+  background: #7EB8F7;
+}
+.ws-divider::after {
+  content: '⋮';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  color: rgba(255,255,255,.3);
+  font-size: 16px;
+  pointer-events: none;
+}
+
+/* Session divider */
+.session-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 14px;
+  user-select: none;
+}
+.session-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--b);
+}
+.session-divider-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mu);
+  background: var(--s);
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--b);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Notebook content */
+.ws-entry {
+  margin-bottom: 4px;
+}
+.ws-entry-meta {
+  font-size: 10px;
+  color: var(--mu);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ws-entry-author {
+  font-weight: 600;
+  color: var(--bl);
+}
+.ws-entry-author.student { color: var(--gr); }
+.ws-entry-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--t);
+  white-space: pre-wrap;
+  padding: 6px 10px;
+  border-radius: var(--r);
+  background: var(--bg);
+  border-left: 3px solid var(--bl);
+  word-break: break-word;
+}
+.ws-entry-content.student-entry {
+  border-left-color: var(--gr);
+}
+
+/* Typing indicator */
+.ws-typing {
+  font-size: 12px;
+  color: var(--mu);
+  font-style: italic;
+  padding: 4px 10px;
+  display: none;
+}
+.ws-typing.show { display: block; }
+
+/* Input area */
+.ws-input-area {
+  border-top: 1px solid var(--b);
+  padding: 12px 16px;
+  background: var(--s);
+  flex-shrink: 0;
+}
+.ws-input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ws-input {
+  flex: 1;
+  border: 1px solid var(--b);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: none;
+  background: var(--bg);
+  color: var(--t);
+  outline: none;
+  min-height: 44px;
+  max-height: 120px;
+  transition: border-color .15s;
+}
+.ws-input:focus { border-color: var(--bl); }
+.ws-send-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r);
+  background: var(--bl);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+}
+.ws-send-btn:hover { background: #0C447C; }
+
+/* Formatting toolbar buttons */
+.fmt-btn {
+  background: none;
+  border: 1px solid var(--b);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--mu);
+  font-family: inherit;
+  transition: all .1s;
+}
+.fmt-btn:hover { background: var(--bg); color: var(--t); border-color: var(--bm); }
+.fmt-btn.active { background: var(--bll); color: var(--bl); border-color: var(--bl); }
+
+/* Left panel empty state */
+.ws-empty-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #555;
+  text-align: center;
+  padding: 40px;
+}
+.ws-empty-left .ws-el-icon { font-size: 48px; margin-bottom: 16px; }
+.ws-empty-left .ws-el-title { font-size: 16px; font-weight: 600; color: #777; margin-bottom: 8px; }
+.ws-empty-left .ws-el-sub { font-size: 13px; color: #555; line-height: 1.6; }
+
+/* Subject badge colors */
+.ws-badge-listening { background: rgba(24,95,165,.2); color: #7EB8F7; }
+.ws-badge-reading { background: rgba(29,158,117,.2); color: #5DCAA5; }
+.ws-badge-writing { background: rgba(133,79,11,.2); color: #FAC775; }
+.ws-badge-speaking { background: rgba(155,89,182,.2); color: #D7A6F7; }
+
+/* Classes list */
+.class-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  padding: 14px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.class-card:hover { border-color: var(--bl); background: var(--bll); }
+.class-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+`;
+document.head.appendChild(wsCSS);
+
+// ── Add workspace screen to DOM ──
+var wsScreen = document.createElement('div');
+wsScreen.id = 's-workspace';
+wsScreen.className = 'screen';
+wsScreen.innerHTML = `
+<div class="ws-topbar">
+  <div style="display:flex;align-items:center;gap:12px">
+    <button class="cm-btn" onclick="exitWorkspace()">← Exit</button>
+    <div>
+      <div class="ws-title" id="ws-title">Workspace</div>
+      <div class="ws-subtitle" id="ws-subtitle"></div>
+    </div>
+    <span class="ws-badge" id="ws-subject-badge"></span>
+  </div>
+  <div class="ws-online" id="ws-online-status">
+    <div class="ws-online-dot" id="ws-online-dot"></div>
+    <span id="ws-online-text">—</span>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="cm-btn" onclick="newWsSession()" title="Start new session">📅 New session</button>
+  </div>
+</div>
+<div class="ws-split" id="ws-split">
+  <!-- Left: content panel -->
+  <div class="ws-left" id="ws-left">
+    <div class="ws-left-toolbar">
+      <span style="font-size:12px;color:#888;font-weight:500">📖 Content / Materials</span>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="cm-btn" style="font-size:11px" onclick="wsUploadContent()" title="Upload material">📎 Upload</button>
+      </div>
+    </div>
+    <div class="ws-left-content" id="ws-left-content">
+      <div class="ws-empty-left">
+        <div class="ws-el-icon">📖</div>
+        <div class="ws-el-title">No material loaded</div>
+        <div class="ws-el-sub">Upload a PDF or material using the button above.<br>Books assigned by admin will appear here soon.</div>
+      </div>
+    </div>
+  </div>
+  <!-- Divider -->
+  <div class="ws-divider" id="ws-divider"></div>
+  <!-- Right: notebook -->
+  <div class="ws-right" id="ws-right">
+    <div class="ws-right-toolbar">
+      <span style="font-size:12px;color:var(--mu);font-weight:500">📝 Class notebook</span>
+      <div style="margin-left:auto;display:flex;gap:4px">
+        <button class="fmt-btn" onclick="wsFmt('bold')" title="Bold"><strong>B</strong></button>
+        <button class="fmt-btn" onclick="wsFmt('italic')" title="Italic"><em>I</em></button>
+        <button class="fmt-btn" onclick="wsFmt('bullet')" title="Bullet point">• List</button>
+        <button class="fmt-btn" onclick="wsFmt('number')" title="Numbered list">1. List</button>
+      </div>
+    </div>
+    <div class="ws-notebook" id="ws-notebook">
+      <div class="ws-notebook-inner" id="ws-notebook-inner">
+        <div style="text-align:center;padding:40px;color:var(--mu);font-size:13px">
+          <div style="font-size:32px;margin-bottom:8px">📝</div>
+          Loading notebook...
+        </div>
+      </div>
+    </div>
+    <div class="ws-typing" id="ws-typing-indicator"></div>
+    <div class="ws-input-area">
+      <div class="ws-input-wrap">
+        <textarea class="ws-input" id="ws-input" 
+          placeholder="Type a note or explanation... (Shift+Enter for new line, Enter to send)"
+          onkeydown="wsInputKeydown(event)"
+          oninput="wsInputChange()"></textarea>
+        <button class="ws-send-btn" onclick="wsSend()" title="Send">↑</button>
+      </div>
+      <div style="font-size:11px;color:var(--mu);margin-top:6px">
+        Press <strong>Enter</strong> to send · <strong>Shift+Enter</strong> for new line
+      </div>
+    </div>
+  </div>
+</div>
+<!-- File input for uploads -->
+<input type="file" id="ws-file-input" accept=".pdf,image/*" style="display:none" onchange="wsHandleUpload(this)">
+`;
+document.body.appendChild(wsScreen);
+
+// ── Workspace state ──
+var wsState = {
+  workspaceId: null,
+  studentId: null,
+  studentName: null,
+  teacherId: null,
+  teacherName: null,
+  subject: null,
+  userRole: null,
+  currentSession: null,
+  entries: [],
+  rtdbRef: null,
+  typingRef: null,
+  typingTimeout: null
+};
+
+// ── Subject config ──
+var WS_SUBJECTS = {
+  listening: { icon:'🎧', label:'Listening', badge:'ws-badge-listening' },
+  reading:   { icon:'📖', label:'Reading',   badge:'ws-badge-reading' },
+  writing:   { icon:'✏️', label:'Writing',   badge:'ws-badge-writing' },
+  speaking:  { icon:'🎙', label:'Speaking',  badge:'ws-badge-speaking' }
+};
+
+// ── Open workspace ──
+function openWorkspace(studentId, studentName, teacherId, teacherName, subject){
+  wsState.workspaceId = studentId+'_'+subject;
+  wsState.studentId = studentId;
+  wsState.studentName = studentName;
+  wsState.teacherId = teacherId;
+  wsState.teacherName = teacherName;
+  wsState.subject = subject;
+  wsState.userRole = CRole;
+  wsState.entries = [];
+
+  var subj = WS_SUBJECTS[subject]||{icon:'📚',label:subject,badge:''};
+  var isTeacher = CRole==='teacher'||CRole==='admin';
+
+  // Set topbar
+  document.getElementById('ws-title').textContent =
+    isTeacher ? studentName+'\'s Workspace' : 'My '+subj.label+' Class';
+  document.getElementById('ws-subtitle').textContent =
+    isTeacher ? subj.label+' · '+teacherName : 'with '+teacherName;
+  var badge = document.getElementById('ws-subject-badge');
+  badge.textContent = subj.icon+' '+subj.label;
+  badge.className = 'ws-badge '+subj.badge;
+
+  // Set online status
+  setWsOnlineStatus(false, '');
+
+  // Setup resizable divider
+  setupWsDivider();
+
+  // Load notebook from Firebase
+  loadWsNotebook();
+
+  // Setup realtime presence
+  setupWsPresence();
+
+  showS('workspace');
+}
+
+// ── Load notebook ──
+function loadWsNotebook(){
+  var wsId = wsState.workspaceId;
+  db.collection('workspaces').doc(wsId).get().then(function(d){
+    var data = d.exists ? d.data() : null;
+    if(!data){
+      // Create workspace
+      db.collection('workspaces').doc(wsId).set({
+        studentId: wsState.studentId,
+        studentName: wsState.studentName,
+        teacherId: wsState.teacherId,
+        teacherName: wsState.teacherName,
+        subject: wsState.subject,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    // Load entries
+    db.collection('workspaces').doc(wsId)
+      .collection('entries')
+      .get()
+      .then(function(snap){
+        wsState.entries = [];
+        snap.forEach(function(d){
+          wsState.entries.push(Object.assign({id:d.id},d.data()));
+        });
+        wsState.entries.sort(function(a,b){
+          var ta=a.timestamp?(a.timestamp.toDate?a.timestamp.toDate().getTime():0):a.clientTime||0;
+          var tb=b.timestamp?(b.timestamp.toDate?b.timestamp.toDate().getTime():0):b.clientTime||0;
+          return ta-tb;
+        });
+        // Check if we need a new session for today
+        ensureTodaySession();
+        renderNotebook();
+        // Start realtime listener
+        startWsRealtimeListener();
+      });
+  }).catch(function(e){
+    showToast('Error loading workspace: '+e.message,'err');
+  });
+}
+
+// ── Ensure today's session exists ──
+function ensureTodaySession(){
+  var today = new Date().toDateString();
+  var todaySession = wsState.entries.find(function(e){
+    return e.type==='session' && e.date===today;
+  });
+  if(!todaySession){
+    // Create today's session divider
+    var sessionNum = wsState.entries.filter(function(e){return e.type==='session';}).length+1;
+    var sessionEntry = {
+      type: 'session',
+      date: today,
+      sessionNum: sessionNum,
+      displayDate: new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'}),
+      clientTime: Date.now()
+    };
+    wsState.currentSession = today;
+    // Save to Firestore
+    db.collection('workspaces').doc(wsState.workspaceId)
+      .collection('entries').add(Object.assign({},sessionEntry,{
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      })).then(function(ref){
+        sessionEntry.id = ref.id;
+        wsState.entries.push(sessionEntry);
+        renderNotebook();
+      });
+  } else {
+    wsState.currentSession = today;
+  }
+}
+
+// ── Render notebook ──
+function renderNotebook(){
+  var el = document.getElementById('ws-notebook-inner');
+  if(!el) return;
+  if(!wsState.entries.length){
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--mu);font-size:13px">'+
+      '<div style="font-size:32px;margin-bottom:8px">📝</div>'+
+      'The notebook is empty. Start typing to add notes!</div>';
+    return;
+  }
+  var h = '';
+  wsState.entries.forEach(function(entry){
+    if(entry.type==='session'){
+      h += renderSessionDivider(entry);
+    } else if(entry.type==='message'){
+      h += renderNbEntry(entry);
+    }
+  });
+  el.innerHTML = h;
+  // Scroll to bottom
+  var nb = document.getElementById('ws-notebook');
+  if(nb) nb.scrollTop = nb.scrollHeight;
+}
+
+function renderSessionDivider(entry){
+  return '<div class="session-divider">'+
+    '<div class="session-divider-line"></div>'+
+    '<div class="session-divider-label">'+
+      '📅 Session '+entry.sessionNum+' — '+entry.displayDate+
+    '</div>'+
+    '<div class="session-divider-line"></div>'+
+  '</div>';
+}
+
+function renderNbEntry(entry){
+  var isTeacher = entry.role==='teacher'||entry.role==='admin';
+  var authorLabel = isTeacher ? (entry.authorName||'Teacher') : (entry.authorName||'Student');
+  var time = '';
+  try {
+    var dt = entry.timestamp?(entry.timestamp.toDate?entry.timestamp.toDate():new Date(entry.timestamp)):
+             (entry.clientTime?new Date(entry.clientTime):null);
+    if(dt) time = dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  } catch(e){}
+  // Format content
+  var content = escHTMLCm(entry.content||'')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/\n/g,'<br>');
+  return '<div class="ws-entry">'+
+    '<div class="ws-entry-meta">'+
+      '<span class="ws-entry-author'+(isTeacher?'':' student')+'">'+authorLabel+'</span>'+
+      '<span style="font-size:10px;color:var(--hi)">'+time+'</span>'+
+    '</div>'+
+    '<div class="ws-entry-content'+(isTeacher?'':' student-entry')+'">'+content+'</div>'+
+  '</div>';
+}
+
+// ── Realtime listener ──
+var wsUnsubscribe = null;
+function startWsRealtimeListener(){
+  if(wsUnsubscribe) wsUnsubscribe();
+  // Listen for new entries in real time
+  wsUnsubscribe = db.collection('workspaces').doc(wsState.workspaceId)
+    .collection('entries')
+    .onSnapshot(function(snap){
+      snap.docChanges().forEach(function(change){
+        if(change.type==='added'){
+          var entry = Object.assign({id:change.doc.id},change.doc.data());
+          // Check if already in state
+          var exists = wsState.entries.find(function(e){return e.id===entry.id;});
+          if(!exists){
+            wsState.entries.push(entry);
+            wsState.entries.sort(function(a,b){
+              var ta=a.timestamp?(a.timestamp.toDate?a.timestamp.toDate().getTime():0):a.clientTime||0;
+              var tb=b.timestamp?(b.timestamp.toDate?b.timestamp.toDate().getTime():0):b.clientTime||0;
+              return ta-tb;
+            });
+            renderNotebook();
+          }
+        }
+      });
+    });
+}
+
+// ── Send message ──
+function wsSend(){
+  var inp = document.getElementById('ws-input');
+  if(!inp) return;
+  var content = inp.value.trim();
+  if(!content) return;
+  inp.value = '';
+  inp.style.height = 'auto';
+  var entry = {
+    type: 'message',
+    content: content,
+    role: CRole,
+    authorId: CU.uid,
+    authorName: CRole==='student' ?
+      (document.getElementById('s-name')||{}).textContent :
+      (document.getElementById('t-name')||{}).textContent,
+    sessionDate: wsState.currentSession||new Date().toDateString(),
+    clientTime: Date.now(),
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('workspaces').doc(wsState.workspaceId)
+    .collection('entries').add(entry)
+    .catch(function(e){ showToast('Error sending: '+e.message,'err'); });
+  // Clear typing indicator
+  clearWsTyping();
+}
+
+// ── Input handling ──
+function wsInputKeydown(e){
+  if(e.key==='Enter'&&!e.shiftKey){
+    e.preventDefault();
+    wsSend();
+  }
+}
+
+var wsTypingTimeout = null;
+function wsInputChange(){
+  var inp = document.getElementById('ws-input');
+  if(!inp) return;
+  // Auto resize
+  inp.style.height = 'auto';
+  inp.style.height = Math.min(inp.scrollHeight, 120)+'px';
+  // Typing indicator (simple — no realtime DB needed for now)
+  clearTimeout(wsTypingTimeout);
+  wsTypingTimeout = setTimeout(function(){ clearWsTyping(); }, 3000);
+}
+
+function clearWsTyping(){
+  clearTimeout(wsTypingTimeout);
+}
+
+// ── Formatting ──
+var wsFmtState = {bold:false, italic:false};
+function wsFmt(type){
+  var inp = document.getElementById('ws-input');
+  if(!inp) return;
+  var sel = inp.value.substring(inp.selectionStart, inp.selectionEnd);
+  var before = inp.value.substring(0, inp.selectionStart);
+  var after = inp.value.substring(inp.selectionEnd);
+  if(type==='bold'){
+    inp.value = before+(sel?'**'+sel+'**':'**bold text**')+after;
+  } else if(type==='italic'){
+    inp.value = before+(sel?'*'+sel+'*':'*italic text*')+after;
+  } else if(type==='bullet'){
+    inp.value = before+(inp.value&&!before.endsWith('\n')?'\n':'')+'• '+(sel||'item')+after;
+  } else if(type==='number'){
+    inp.value = before+(inp.value&&!before.endsWith('\n')?'\n':'')+'1. '+(sel||'item')+after;
+  }
+  inp.focus();
+}
+
+// ── New session ──
+function newWsSession(){
+  if(!confirm('Start a new session for today? A new date divider will be added.')) return;
+  var sessionNum = wsState.entries.filter(function(e){return e.type==='session';}).length+1;
+  var today = new Date().toDateString();
+  var sessionEntry = {
+    type: 'session',
+    date: today+'_'+Date.now(), // unique even if multiple sessions same day
+    sessionNum: sessionNum,
+    displayDate: new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'}),
+    clientTime: Date.now(),
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  wsState.currentSession = today;
+  db.collection('workspaces').doc(wsState.workspaceId)
+    .collection('entries').add(sessionEntry)
+    .then(function(){ showToast('New session started!'); })
+    .catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── Upload content ──
+function wsUploadContent(){
+  document.getElementById('ws-file-input').click();
+}
+
+function wsHandleUpload(inp){
+  if(!inp.files||!inp.files[0]) return;
+  var f = inp.files[0];
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var leftContent = document.getElementById('ws-left-content');
+    if(!leftContent) return;
+    if(f.type==='application/pdf'){
+      // Show PDF in iframe
+      leftContent.innerHTML =
+        '<iframe src="'+e.target.result+'" style="width:100%;height:100%;border:none;min-height:600px"></iframe>';
+    } else if(f.type.startsWith('image/')){
+      // Show image
+      leftContent.innerHTML =
+        '<img src="'+e.target.result+'" style="max-width:100%;border-radius:var(--r)">';
+    } else {
+      showToast('Only PDF and image files are supported.','err');
+    }
+  };
+  reader.readAsDataURL(f);
+}
+
+// ── Online presence ──
+function setupWsPresence(){
+  // Simple presence — just show who created the workspace
+  setWsOnlineStatus(true, CRole==='student'?
+    'You are connected':'Connected as teacher');
+}
+
+function setWsOnlineStatus(online, text){
+  var dot = document.getElementById('ws-online-dot');
+  var txt = document.getElementById('ws-online-text');
+  if(dot) dot.className = 'ws-online-dot'+(online?' online':'');
+  if(txt) txt.textContent = text||'—';
+}
+
+// ── Resizable divider ──
+function setupWsDivider(){
+  var divider = document.getElementById('ws-divider');
+  var left = document.getElementById('ws-left');
+  var right = document.getElementById('ws-right');
+  var split = document.getElementById('ws-split');
+  if(!divider||!left||!right||!split) return;
+  var dragging = false;
+  divider.onmousedown = function(e){
+    dragging = true;
+    divider.classList.add('dragging');
+    e.preventDefault();
+  };
+  document.onmousemove = function(e){
+    if(!dragging) return;
+    var rect = split.getBoundingClientRect();
+    var pct = ((e.clientX-rect.left)/rect.width*100);
+    pct = Math.max(20, Math.min(80, pct));
+    left.style.width = pct+'%';
+    right.style.flex = 'none';
+    right.style.width = (100-pct-0.4)+'%';
+  };
+  document.onmouseup = function(){
+    if(dragging){ dragging=false; divider.classList.remove('dragging'); }
+  };
+}
+
+// ── Exit workspace ──
+function exitWorkspace(){
+  if(wsUnsubscribe){ wsUnsubscribe(); wsUnsubscribe=null; }
+  wsState = {workspaceId:null,studentId:null,studentName:null,
+    teacherId:null,teacherName:null,subject:null,
+    userRole:null,currentSession:null,entries:[],
+    rtdbRef:null,typingRef:null,typingTimeout:null};
+  if(CRole==='student') showS('student');
+  else showS('teacher');
+}
+
+// ── Add "My Classes" to student portal ──
+var _prevLoadStudent4 = loadStudent;
+loadStudent = function(d){
+  _prevLoadStudent4(d);
+  setTimeout(function(){ buildStudentClassesList(); }, 800);
+};
+
+function buildStudentClassesList(){
+  var shome = document.getElementById('shome');
+  if(!shome) return;
+  // Check if classes section already exists
+  if(document.getElementById('s-classes-section')) return;
+  var classSection = document.createElement('div');
+  classSection.id = 's-classes-section';
+  classSection.innerHTML =
+    '<div class="dv"></div>'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:12px">My classes</div>'+
+    '<div id="s-classes-list">'+
+      '<div style="color:var(--mu);font-size:13px">Loading classes...</div>'+
+    '</div>';
+  // Insert before results section
+  var resultsDiv = shome.querySelector('.dv');
+  if(resultsDiv) shome.insertBefore(classSection, resultsDiv);
+  else shome.appendChild(classSection);
+  loadStudentClasses();
+}
+
+function loadStudentClasses(){
+  var el = document.getElementById('s-classes-list');
+  if(!el) return;
+  // Load workspaces for this student
+  db.collection('workspaces')
+    .where('studentId','==',CU.uid)
+    .get()
+    .then(function(snap){
+      if(snap.empty){
+        el.innerHTML = '<div style="color:var(--mu);font-size:13px;padding:12px 0">'+
+          'No classes set up yet. Your teacher will create your workspace.</div>';
+        return;
+      }
+      var h='';
+      snap.forEach(function(d){
+        var ws = d.data();
+        var subj = WS_SUBJECTS[ws.subject]||{icon:'📚',label:ws.subject,badge:''};
+        h += '<div class="class-card" onclick="openWorkspace(\''+ws.studentId+'\',\''+ws.studentName+'\',\''+ws.teacherId+'\',\''+ws.teacherName+'\',\''+ws.subject+'\')">'+
+          '<div class="class-icon" style="background:var(--bll)">'+subj.icon+'</div>'+
+          '<div style="flex:1">'+
+            '<div style="font-size:14px;font-weight:600">'+subj.label+'</div>'+
+            '<div style="font-size:12px;color:var(--mu)">with '+ws.teacherName+'</div>'+
+          '</div>'+
+          '<span class="ws-badge '+subj.badge+'">Open →</span>'+
+        '</div>';
+      });
+      el.innerHTML = h;
+    }).catch(function(){
+      el.innerHTML = '<div style="color:var(--mu);font-size:13px">Could not load classes.</div>';
+    });
+}
+
+// ── Add workspace button to teacher's student list ──
+rendMyStudents = function(){
+  var el = document.getElementById('ms-list');
+  if(!el) return;
+  var students = allUsers.filter(function(u){ return u.role==='student'; });
+  if(!students.length){
+    el.innerHTML = '<div style="padding:16px;color:var(--mu);font-size:13px">No students registered yet.</div>';
+    return;
+  }
+  el.innerHTML = students.map(function(u){
+    var ini=(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    return '<div style="border:1px solid var(--b);border-radius:var(--rl);margin-bottom:10px;overflow:hidden">'+
+      '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--s)">'+
+        '<div style="width:40px;height:40px;border-radius:50%;background:var(--bll);color:var(--bl);'+
+          'display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0">'+ini+'</div>'+
+        '<div style="flex:1">'+
+          '<div style="font-size:14px;font-weight:600">'+u.name+'</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+u.email+'</div>'+
+        '</div>'+
+        '<span class="badge b-gr">Student</span>'+
+      '</div>'+
+      // Workspace buttons per subject
+      '<div style="padding:10px 16px;background:var(--bg);border-top:1px solid var(--b);display:flex;gap:8px;flex-wrap:wrap">'+
+        '<span style="font-size:12px;color:var(--mu);align-self:center;margin-right:4px">Open workspace:</span>'+
+        ['listening','reading','writing','speaking'].map(function(subj){
+          var s=WS_SUBJECTS[subj];
+          return '<button class="btn btn-sm" style="font-size:12px" '+
+            'onclick="openWorkspace(\''+u.id+'\',\''+u.name+'\',\''+CU.uid+'\',\''+
+            (document.getElementById('t-name')||{}).textContent+'\',\''+subj+'\')">'+
+            s.icon+' '+s.label+'</button>';
+        }).join('')+
+      '</div>'+
+    '</div>';
+  }).join('');
+};
+
+console.log('JIC IELTS — Workspace foundation loaded ✓');
+</script>
