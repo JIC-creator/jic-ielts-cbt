@@ -15547,3 +15547,152 @@ window.newWsSession = function(){
 
 console.log('JIC IELTS — collaborative document editor loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: PDF viewer in workspace left panel
+//  Uses PDF.js for reliable PDF rendering
+// ═══════════════════════════════════════════════
+
+// Load PDF.js from CDN
+if(!window.pdfjsLib){
+  var pdfScript = document.createElement('script');
+  pdfScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+  pdfScript.onload = function(){
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  };
+  document.head.appendChild(pdfScript);
+}
+
+// Override wsHandleUpload with proper PDF.js viewer
+wsHandleUpload = function(inp){
+  if(!inp.files||!inp.files[0]) return;
+  var f = inp.files[0];
+  var leftContent = document.getElementById('ws-left-content');
+  if(!leftContent) return;
+
+  if(f.type==='application/pdf'){
+    showToast('Loading PDF...');
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var data = new Uint8Array(e.target.result);
+      renderPDFViewer(data, leftContent, f.name);
+    };
+    reader.readAsArrayBuffer(f);
+  } else if(f.type.startsWith('image/')){
+    var reader2 = new FileReader();
+    reader2.onload = function(e){
+      leftContent.innerHTML =
+        '<div style="padding:10px">'+
+          '<div style="font-size:12px;color:#888;margin-bottom:8px">📄 '+f.name+'</div>'+
+          '<img src="'+e.target.result+'" style="max-width:100%;border-radius:4px;cursor:zoom-in" onclick="openLB(this.src)">'+
+        '</div>';
+    };
+    reader2.readAsDataURL(f);
+  } else {
+    showToast('Please upload a PDF or image file.','err');
+  }
+  // Reset input
+  inp.value = '';
+};
+
+function renderPDFViewer(data, container, filename){
+  // Build PDF viewer UI
+  container.innerHTML =
+    '<div style="display:flex;flex-direction:column;height:100%">'+
+      // PDF toolbar
+      '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;'+
+        'background:#1a1a2e;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0">'+
+        '<span style="font-size:12px;color:#888;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 '+filename+'</span>'+
+        '<button onclick="pdfPrevPage()" style="background:rgba(255,255,255,.1);border:none;color:#fff;'+
+          'padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">◀</button>'+
+        '<span style="font-size:12px;color:#ccc;white-space:nowrap">'+
+          '<span id="pdf-cur-page">1</span> / <span id="pdf-total-pages">?</span>'+
+        '</span>'+
+        '<button onclick="pdfNextPage()" style="background:rgba(255,255,255,.1);border:none;color:#fff;'+
+          'padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">▶</button>'+
+        '<button onclick="pdfZoomIn()" style="background:rgba(255,255,255,.1);border:none;color:#fff;'+
+          'padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px">+</button>'+
+        '<button onclick="pdfZoomOut()" style="background:rgba(255,255,255,.1);border:none;color:#fff;'+
+          'padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px">−</button>'+
+      '</div>'+
+      // Canvas area
+      '<div id="pdf-canvas-wrap" style="flex:1;overflow-y:auto;overflow-x:auto;'+
+        'display:flex;align-items:flex-start;justify-content:center;padding:16px;background:#525659">'+
+        '<canvas id="pdf-canvas" style="box-shadow:0 2px 12px rgba(0,0,0,.4)"></canvas>'+
+      '</div>'+
+    '</div>';
+
+  // Load PDF
+  pdfjsLib.getDocument({data: data}).promise.then(function(pdf){
+    window._pdfDoc = pdf;
+    window._pdfPage = 1;
+    window._pdfScale = 1.2;
+    document.getElementById('pdf-total-pages').textContent = pdf.numPages;
+    renderPDFPage(1);
+    showToast('PDF loaded! '+pdf.numPages+' pages.');
+  }).catch(function(e){
+    container.innerHTML =
+      '<div style="padding:24px;text-align:center;color:#888">'+
+        '<div style="font-size:32px;margin-bottom:8px">❌</div>'+
+        'Could not load PDF: '+e.message+
+      '</div>';
+    showToast('PDF load error: '+e.message,'err');
+  });
+}
+
+function renderPDFPage(pageNum){
+  if(!window._pdfDoc) return;
+  window._pdfDoc.getPage(pageNum).then(function(page){
+    var scale = window._pdfScale||1.2;
+    var viewport = page.getViewport({scale:scale});
+    var canvas = document.getElementById('pdf-canvas');
+    if(!canvas) return;
+    var ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    page.render({canvasContext:ctx, viewport:viewport}).promise.then(function(){
+      document.getElementById('pdf-cur-page').textContent = pageNum;
+      window._pdfPage = pageNum;
+    });
+  });
+}
+
+window.pdfPrevPage = function(){
+  if(!window._pdfDoc||window._pdfPage<=1) return;
+  renderPDFPage(window._pdfPage-1);
+};
+window.pdfNextPage = function(){
+  if(!window._pdfDoc||window._pdfPage>=window._pdfDoc.numPages) return;
+  renderPDFPage(window._pdfPage+1);
+};
+window.pdfZoomIn = function(){
+  window._pdfScale = (window._pdfScale||1.2)+0.2;
+  renderPDFPage(window._pdfPage||1);
+};
+window.pdfZoomOut = function(){
+  window._pdfScale = Math.max(0.4,(window._pdfScale||1.2)-0.2);
+  renderPDFPage(window._pdfPage||1);
+};
+
+// Also update left toolbar to show upload hint
+var _prevBuildDocEditor = buildDocEditor;
+buildDocEditor = function(){
+  _prevBuildDocEditor();
+  // Update left toolbar label
+  var leftToolbar = document.querySelector('.ws-left-toolbar span');
+  if(leftToolbar) leftToolbar.textContent = '📖 Materials / Book';
+};
+
+// Update wsUploadContent to show supported formats
+wsUploadContent = function(){
+  showToast('Select a PDF book or image file...');
+  document.getElementById('ws-file-input').click();
+};
+
+// Update file input to accept PDF + images
+var fileInp = document.getElementById('ws-file-input');
+if(fileInp) fileInp.accept = '.pdf,image/*,application/pdf';
+
+console.log('JIC IELTS — PDF viewer loaded ✓');
+</script>
