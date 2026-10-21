@@ -15890,3 +15890,108 @@ document.addEventListener('keydown', function(e){
 
 console.log('JIC IELTS — PDF viewer fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: PDF isolated per workspace
+//  Each subject workspace has its own PDF state
+// ═══════════════════════════════════════════════
+
+// Store PDF state per workspace ID
+window._pdfStore = {};
+
+// Override openWorkspace to clear PDF state when switching
+var _prevOpenWorkspace2 = openWorkspace;
+openWorkspace = function(studentId, studentName, teacherId, teacherName, subject){
+  // Save current PDF state before switching
+  if(wsState.workspaceId && window._pdfDoc){
+    window._pdfStore[wsState.workspaceId] = {
+      doc: window._pdfDoc,
+      page: window._pdfPage||1,
+      scale: window._pdfScale||1.2
+    };
+  }
+  // Clear global PDF state
+  window._pdfDoc = null;
+  window._pdfPage = 1;
+  window._pdfScale = 1.2;
+  // Call original
+  _prevOpenWorkspace2(studentId, studentName, teacherId, teacherName, subject);
+  // Restore PDF state if this workspace had one
+  var newWsId = studentId+'_'+subject;
+  var saved = window._pdfStore[newWsId];
+  if(saved){
+    window._pdfDoc = saved.doc;
+    window._pdfPage = saved.page;
+    window._pdfScale = saved.scale;
+    // Re-render after workspace loads
+    setTimeout(function(){
+      if(window._pdfDoc){
+        // Rebuild the PDF viewer UI
+        var leftContent = document.getElementById('ws-left-content');
+        if(leftContent){
+          leftContent.innerHTML =
+            '<div style="display:flex;flex-direction:column;height:100%">'+
+              '<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;'+
+                'background:#1a1a2e;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;flex-wrap:wrap">'+
+                '<span style="font-size:11px;color:#888;flex:1">📄 Previously loaded PDF</span>'+
+                '<button onclick="pdfPrevPage()" style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">◀ Prev</button>'+
+                '<span style="font-size:12px;color:#ccc;padding:0 4px">Page <span id="pdf-cur-page">'+saved.page+'</span> of <span id="pdf-total-pages">'+window._pdfDoc.numPages+'</span></span>'+
+                '<button onclick="pdfNextPage()" style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">Next ▶</button>'+
+                '<button onclick="pdfZoomOut()" style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px">−</button>'+
+                '<span id="pdf-zoom-label" style="font-size:11px;color:#888;min-width:36px;text-align:center">'+Math.round(saved.scale*100)+'%</span>'+
+                '<button onclick="pdfZoomIn()" style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px">+</button>'+
+              '</div>'+
+              '<div id="pdf-canvas-wrap" style="flex:1;overflow:auto;background:#525659;padding:16px;box-sizing:border-box;text-align:center">'+
+                '<canvas id="pdf-canvas" style="box-shadow:0 2px 16px rgba(0,0,0,.5);max-width:100%"></canvas>'+
+              '</div>'+
+            '</div>';
+          renderPDFPage(saved.page);
+        }
+      }
+    }, 300);
+  } else {
+    // Clear left panel — no PDF for this workspace
+    setTimeout(function(){
+      var leftContent = document.getElementById('ws-left-content');
+      if(leftContent && window._pdfDoc === null){
+        leftContent.innerHTML =
+          '<div class="ws-empty-left">'+
+            '<div class="ws-el-icon">📖</div>'+
+            '<div class="ws-el-title">No material loaded</div>'+
+            '<div class="ws-el-sub">Upload a PDF or material using the 📎 Upload button above.<br>Each subject workspace has its own materials.</div>'+
+          '</div>';
+      }
+    }, 300);
+  }
+};
+
+// Override exitWorkspace to save PDF state
+var _prevExitWorkspace2 = exitWorkspace;
+exitWorkspace = function(){
+  // Save PDF state for current workspace
+  if(wsState.workspaceId && window._pdfDoc){
+    window._pdfStore[wsState.workspaceId] = {
+      doc: window._pdfDoc,
+      page: window._pdfPage||1,
+      scale: window._pdfScale||1.2
+    };
+  }
+  // Clear global state
+  window._pdfDoc = null;
+  window._pdfPage = 1;
+  window._pdfScale = 1.2;
+  _prevExitWorkspace2();
+};
+
+// Override wsHandleUpload to tag PDF to current workspace
+var _prevWsHandleUpload = wsHandleUpload;
+wsHandleUpload = function(inp){
+  // Clear any previously stored PDF for this workspace
+  if(wsState.workspaceId){
+    window._pdfStore[wsState.workspaceId] = null;
+  }
+  _prevWsHandleUpload(inp);
+};
+
+console.log('JIC IELTS — per-workspace PDF isolation loaded ✓');
+</script>
