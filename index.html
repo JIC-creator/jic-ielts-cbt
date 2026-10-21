@@ -15696,3 +15696,197 @@ if(fileInp) fileInp.accept = '.pdf,image/*,application/pdf';
 
 console.log('JIC IELTS — PDF viewer loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: PDF viewer — use ArrayBuffer + PDF.js properly
+//  7MB PDF, 25 pages, embedded fonts
+// ═══════════════════════════════════════════════
+
+// Ensure PDF.js is loaded with correct version
+(function(){
+  // Remove any existing PDF.js scripts
+  var existing = document.querySelector('script[src*="pdf.min.js"]');
+  if(!existing){
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = function(){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      console.log('PDF.js loaded ✓');
+    };
+    document.head.appendChild(s);
+  } else {
+    // Already loaded — just set worker
+    if(window.pdfjsLib){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  }
+})();
+
+// Override wsHandleUpload with robust PDF.js implementation
+wsHandleUpload = function(inp){
+  if(!inp.files||!inp.files[0]) return;
+  var f = inp.files[0];
+  var leftContent = document.getElementById('ws-left-content');
+  if(!leftContent){ showToast('Left panel not found.','err'); return; }
+
+  if(f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf')){
+    showToast('Loading PDF: '+f.name+'...');
+
+    // Build viewer UI first
+    leftContent.innerHTML =
+      '<div style="display:flex;flex-direction:column;height:100%">'+
+        // Toolbar
+        '<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;'+
+          'background:#1a1a2e;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;flex-wrap:wrap">'+
+          '<span style="font-size:11px;color:#888;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 '+f.name+'</span>'+
+          '<button id="pdf-btn-prev" onclick="pdfPrevPage()" '+
+            'style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">◀ Prev</button>'+
+          '<span style="font-size:12px;color:#ccc;white-space:nowrap;padding:0 4px">'+
+            'Page <span id="pdf-cur-page">—</span> of <span id="pdf-total-pages">—</span>'+
+          '</span>'+
+          '<button id="pdf-btn-next" onclick="pdfNextPage()" '+
+            'style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">Next ▶</button>'+
+          '<button onclick="pdfZoomOut()" '+
+            'style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px" title="Zoom out">−</button>'+
+          '<span id="pdf-zoom-label" style="font-size:11px;color:#888;min-width:36px;text-align:center">120%</span>'+
+          '<button onclick="pdfZoomIn()" '+
+            'style="background:rgba(255,255,255,.12);border:none;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px" title="Zoom in">+</button>'+
+        '</div>'+
+        // Loading indicator
+        '<div id="pdf-loading" style="flex:1;display:flex;align-items:center;justify-content:center;'+
+          'background:#525659;color:#ccc;flex-direction:column;gap:12px">'+
+          '<div style="font-size:32px">⏳</div>'+
+          '<div style="font-size:14px">Loading PDF...</div>'+
+          '<div style="font-size:12px;color:#888">'+f.name+' ('+Math.round(f.size/1024/1024*10)/10+' MB)</div>'+
+        '</div>'+
+        // Canvas container
+        '<div id="pdf-canvas-wrap" style="flex:1;overflow:auto;display:none;'+
+          'background:#525659;padding:16px;box-sizing:border-box;text-align:center">'+
+          '<canvas id="pdf-canvas" style="box-shadow:0 2px 16px rgba(0,0,0,.5);max-width:100%"></canvas>'+
+        '</div>'+
+      '</div>';
+
+    // Read file as ArrayBuffer
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var arrayBuffer = e.target.result;
+      // Wait for PDF.js to be ready
+      function loadPDF(){
+        if(!window.pdfjsLib){
+          setTimeout(loadPDF, 200);
+          return;
+        }
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        var loadingTask = pdfjsLib.getDocument({data: arrayBuffer});
+        loadingTask.promise.then(function(pdf){
+          window._pdfDoc = pdf;
+          window._pdfPage = 1;
+          window._pdfScale = 1.2;
+          // Update page count
+          var tot = document.getElementById('pdf-total-pages');
+          if(tot) tot.textContent = pdf.numPages;
+          // Hide loading, show canvas
+          var loading = document.getElementById('pdf-loading');
+          var wrap = document.getElementById('pdf-canvas-wrap');
+          if(loading) loading.style.display='none';
+          if(wrap) wrap.style.display='block';
+          // Render first page
+          renderPDFPage(1);
+          showToast('✓ PDF loaded — '+pdf.numPages+' pages');
+        }).catch(function(err){
+          var loading = document.getElementById('pdf-loading');
+          if(loading) loading.innerHTML =
+            '<div style="font-size:32px;margin-bottom:8px">❌</div>'+
+            '<div style="font-size:14px;color:#f88">Failed to load PDF</div>'+
+            '<div style="font-size:12px;color:#888;margin-top:6px">'+err.message+'</div>';
+          showToast('PDF error: '+err.message,'err');
+        });
+      }
+      loadPDF();
+    };
+    reader.onerror = function(){
+      showToast('Failed to read file.','err');
+    };
+    reader.readAsArrayBuffer(f);
+
+  } else if(f.type.startsWith('image/')){
+    var r = new FileReader();
+    r.onload = function(e){
+      leftContent.innerHTML =
+        '<div style="padding:12px;height:100%;overflow-y:auto;background:#1a1a2e">'+
+          '<div style="font-size:11px;color:#888;margin-bottom:8px">📄 '+f.name+'</div>'+
+          '<img src="'+e.target.result+'" '+
+            'style="max-width:100%;border-radius:4px;cursor:zoom-in;box-shadow:0 2px 8px rgba(0,0,0,.4)" '+
+            'onclick="openLB(this.src)" title="Click to enlarge">'+
+        '</div>';
+    };
+    r.readAsDataURL(f);
+  } else {
+    showToast('Please upload a PDF or image file.','err');
+  }
+  inp.value = '';
+};
+
+// Render specific PDF page
+renderPDFPage = function(pageNum){
+  if(!window._pdfDoc) return;
+  var numPages = window._pdfDoc.numPages;
+  if(pageNum<1) pageNum=1;
+  if(pageNum>numPages) pageNum=numPages;
+
+  window._pdfDoc.getPage(pageNum).then(function(page){
+    var scale = window._pdfScale||1.2;
+    var viewport = page.getViewport({scale:scale});
+    var canvas = document.getElementById('pdf-canvas');
+    if(!canvas) return;
+    var ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    var renderCtx = {canvasContext:ctx, viewport:viewport};
+    page.render(renderCtx).promise.then(function(){
+      window._pdfPage = pageNum;
+      var cur = document.getElementById('pdf-cur-page');
+      var zl = document.getElementById('pdf-zoom-label');
+      if(cur) cur.textContent = pageNum;
+      if(zl) zl.textContent = Math.round(scale*100)+'%';
+      // Scroll canvas into view
+      var wrap = document.getElementById('pdf-canvas-wrap');
+      if(wrap) wrap.scrollTop = 0;
+    });
+  }).catch(function(e){
+    showToast('Page render error: '+e.message,'err');
+  });
+};
+
+window.pdfPrevPage = function(){
+  if(!window._pdfDoc||window._pdfPage<=1) return;
+  renderPDFPage(window._pdfPage-1);
+};
+window.pdfNextPage = function(){
+  if(!window._pdfDoc) return;
+  if(window._pdfPage>=window._pdfDoc.numPages) return;
+  renderPDFPage(window._pdfPage+1);
+};
+window.pdfZoomIn = function(){
+  window._pdfScale = Math.min(3.0,(window._pdfScale||1.2)+0.2);
+  renderPDFPage(window._pdfPage||1);
+};
+window.pdfZoomOut = function(){
+  window._pdfScale = Math.max(0.4,(window._pdfScale||1.2)-0.2);
+  renderPDFPage(window._pdfPage||1);
+};
+
+// Keyboard navigation for PDF
+document.addEventListener('keydown', function(e){
+  var wrap = document.getElementById('pdf-canvas-wrap');
+  if(!wrap||wrap.style.display==='none'||!window._pdfDoc) return;
+  if(e.key==='ArrowRight'||e.key==='ArrowDown') pdfNextPage();
+  if(e.key==='ArrowLeft'||e.key==='ArrowUp') pdfPrevPage();
+});
+
+console.log('JIC IELTS — PDF viewer fix loaded ✓');
+</script>
