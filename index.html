@@ -15995,3 +15995,780 @@ wsHandleUpload = function(inp){
 
 console.log('JIC IELTS — per-workspace PDF isolation loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  STUDENT PORTAL — Tab structure
+//  My Tests | My Classes | My Textbooks | 
+//  My Vocabulary | My Results
+// ═══════════════════════════════════════════════
+
+var studentTabCSS = document.createElement('style');
+studentTabCSS.textContent = `
+/* Student tab bar */
+.s-tabbar {
+  display: flex;
+  background: var(--s);
+  border-bottom: 2px solid var(--b);
+  flex-shrink: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.s-tabbar::-webkit-scrollbar { display: none; }
+.s-tab {
+  padding: 14px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mu);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  white-space: nowrap;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.s-tab:hover { color: var(--t); background: var(--bg); }
+.s-tab.active {
+  color: var(--bl);
+  font-weight: 700;
+  border-bottom-color: var(--bl);
+}
+.s-tab .s-tab-badge {
+  background: var(--rd);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+/* Tab content panels */
+.s-tab-panel {
+  display: none;
+  padding: 24px;
+  flex: 1;
+  overflow-y: auto;
+}
+.s-tab-panel.active { display: block; }
+
+/* Vocabulary list card */
+.vocab-list-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.vocab-list-hdr {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--b);
+}
+.vocab-list-body { padding: 14px 18px; }
+.vocab-word-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--b);
+}
+.vocab-word-row:last-child { border-bottom: none; }
+.vocab-word {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--bl);
+  min-width: 140px;
+  flex-shrink: 0;
+}
+.vocab-pos {
+  font-size: 11px;
+  color: var(--mu);
+  font-style: italic;
+  margin-top: 2px;
+}
+.vocab-def {
+  font-size: 13px;
+  color: var(--t);
+  line-height: 1.5;
+  flex: 1;
+}
+.vocab-example {
+  font-size: 12px;
+  color: var(--mu);
+  font-style: italic;
+  margin-top: 4px;
+}
+
+/* Vocab test card */
+.vocab-test-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  margin-bottom: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all .15s;
+}
+.vocab-test-card:hover { border-color: var(--bl); }
+.vocab-test-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.vts-open { background: var(--grl); color: var(--gr); }
+.vts-upcoming { background: var(--bll); color: var(--bl); }
+.vts-closed { background: var(--bg); color: var(--mu); border: 1px solid var(--b); }
+.vts-completed { background: var(--grl); color: var(--gr); }
+
+/* Textbook card */
+.textbook-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.textbook-card:hover { border-color: var(--bl); background: var(--bll); }
+.textbook-icon {
+  width: 48px;
+  height: 60px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--bl), #0C447C);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+  box-shadow: 2px 2px 6px rgba(0,0,0,.15);
+}
+
+/* Admin vocab management */
+.vocab-admin-section { margin-bottom: 24px; }
+`;
+document.head.appendChild(studentTabCSS);
+
+// ── Rebuild student main content with tabs ──
+var _prevLoadStudent6 = loadStudent;
+loadStudent = function(d){
+  var name = d.name||'Student';
+  var nameEl = document.getElementById('s-name');
+  if(nameEl) nameEl.textContent = name;
+
+  // Rebuild main content area with tabs
+  var mc = document.querySelector('#s-student .mc');
+  if(mc){
+    mc.innerHTML =
+      // Tab bar
+      '<div class="s-tabbar">'+
+        '<button class="s-tab active" id="stab-tests" onclick="switchSTab(\'tests\',this)">📋 My Tests</button>'+
+        '<button class="s-tab" id="stab-classes" onclick="switchSTab(\'classes\',this)">📚 My Classes</button>'+
+        '<button class="s-tab" id="stab-textbooks" onclick="switchSTab(\'textbooks\',this)">📖 My Textbooks</button>'+
+        '<button class="s-tab" id="stab-vocab" onclick="switchSTab(\'vocab\',this)">🔤 My Vocabulary</button>'+
+        '<button class="s-tab" id="stab-results" onclick="switchSTab(\'results\',this)">📊 My Results</button>'+
+      '</div>'+
+      // Tab panels
+      '<div id="spanel-tests" class="s-tab-panel active">'+
+        '<div style="font-size:18px;font-weight:700;margin-bottom:16px">Welcome, '+name+'! 👋</div>'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:20px">Your assigned tests are below.</div>'+
+        '<div id="s-tests"><div style="text-align:center;padding:32px;color:var(--mu)">'+
+          '<div style="font-size:32px;margin-bottom:8px">⏳</div>Loading tests...</div></div>'+
+      '</div>'+
+      '<div id="spanel-classes" class="s-tab-panel">'+
+        '<div style="font-size:18px;font-weight:700;margin-bottom:16px">My Classes</div>'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:20px">Your classroom workspaces with each teacher.</div>'+
+        '<div id="s-classes-list"><div style="text-align:center;padding:32px;color:var(--mu)">'+
+          '<div style="font-size:32px;margin-bottom:8px">⏳</div>Loading classes...</div></div>'+
+      '</div>'+
+      '<div id="spanel-textbooks" class="s-tab-panel">'+
+        '<div style="font-size:18px;font-weight:700;margin-bottom:16px">My Textbooks</div>'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:20px">Books and materials assigned to you by your teacher or admin.</div>'+
+        '<div id="s-textbooks-list"><div style="text-align:center;padding:32px;color:var(--mu)">'+
+          '<div style="font-size:32px;margin-bottom:8px">📖</div>No textbooks assigned yet.</div></div>'+
+      '</div>'+
+      '<div id="spanel-vocab" class="s-tab-panel">'+
+        '<div style="font-size:18px;font-weight:700;margin-bottom:16px">My Vocabulary</div>'+
+        '<div id="s-vocab-content">'+
+          '<div id="s-vocab-list-section">'+
+            '<div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--mu)">📖 Today\'s vocabulary list</div>'+
+            '<div id="s-vocab-list"><div style="text-align:center;padding:32px;color:var(--mu)">'+
+              '<div style="font-size:32px;margin-bottom:8px">⏳</div>Loading vocabulary...</div></div>'+
+          '</div>'+
+          '<div class="dv" style="margin:24px 0"></div>'+
+          '<div id="s-vocab-test-section">'+
+            '<div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--mu)">✏️ Vocabulary test</div>'+
+            '<div id="s-vocab-test"><div style="text-align:center;padding:24px;color:var(--mu)">'+
+              '<div style="font-size:32px;margin-bottom:8px">🔤</div>No vocabulary test scheduled today.</div></div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div id="spanel-results" class="s-tab-panel">'+
+        '<div style="font-size:18px;font-weight:700;margin-bottom:16px">My Results</div>'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:20px">Your test scores and band estimates.</div>'+
+        '<div id="s-results"><div style="color:var(--mu);font-size:13px">Loading results...</div></div>'+
+      '</div>';
+  }
+
+  showS('student');
+  // Load all tab data
+  loadStudentTests();
+  loadStudentClasses();
+  loadStudentResults();
+  loadStudentVocab();
+  startSNotifPolling();
+};
+
+// ── Tab switcher ──
+function switchSTab(tab, el){
+  // Update tab buttons
+  document.querySelectorAll('.s-tab').forEach(function(t){ t.classList.remove('active'); });
+  if(el) el.classList.add('active');
+  // Update panels
+  document.querySelectorAll('.s-tab-panel').forEach(function(p){ p.classList.remove('active'); });
+  var panel = document.getElementById('spanel-'+tab);
+  if(panel) panel.classList.add('active');
+  // Load content on demand
+  if(tab==='classes') loadStudentClasses();
+  if(tab==='results') loadStudentResults();
+  if(tab==='vocab') loadStudentVocab();
+  if(tab==='textbooks') loadStudentTextbooks();
+}
+
+// ── VOCABULARY ──
+
+// Load student vocabulary list + test
+function loadStudentVocab(){
+  if(!CU) return;
+  var listEl = document.getElementById('s-vocab-list');
+  var testEl = document.getElementById('s-vocab-test');
+  if(!listEl||!testEl) return;
+
+  // Load assigned vocabulary lists
+  db.collection('vocab_assignments')
+    .where('studentIds','array-contains',CU.uid)
+    .get()
+    .then(function(snap){
+      if(snap.empty){
+        listEl.innerHTML =
+          '<div style="text-align:center;padding:24px;color:var(--mu)">'+
+            '<div style="font-size:32px;margin-bottom:8px">📝</div>'+
+            'No vocabulary list assigned yet.</div>';
+        return;
+      }
+      // Get most recent assignment
+      var assignments = [];
+      snap.forEach(function(d){ assignments.push(Object.assign({id:d.id},d.data())); });
+      assignments.sort(function(a,b){
+        var ta=a.createdAt?(a.createdAt.toDate?a.createdAt.toDate().getTime():0):0;
+        var tb=b.createdAt?(b.createdAt.toDate?b.createdAt.toDate().getTime():0):0;
+        return tb-ta;
+      });
+      var latest = assignments[0];
+      // Load vocab list content
+      db.collection('vocab_lists').doc(latest.vocabListId).get().then(function(vd){
+        if(!vd.exists){
+          listEl.innerHTML='<div style="color:var(--mu);font-size:13px">Vocabulary list not found.</div>';
+          return;
+        }
+        var vlist = vd.data();
+        renderStudentVocabList(vlist, listEl);
+        // Check for test
+        checkVocabTest(latest, testEl);
+      });
+    }).catch(function(){
+      listEl.innerHTML='<div style="color:var(--mu);font-size:13px">Could not load vocabulary.</div>';
+    });
+}
+
+function renderStudentVocabList(vlist, el){
+  var words = vlist.words||[];
+  if(!words.length){
+    el.innerHTML='<div style="color:var(--mu);font-size:13px">No words in this list.</div>';
+    return;
+  }
+  var h='<div class="vocab-list-card">'+
+    '<div class="vocab-list-hdr">'+
+      '<div style="font-size:20px">📖</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:14px;font-weight:600">'+vlist.title+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+words.length+' words · '+( vlist.level||'')+'</div>'+
+      '</div>'+
+      '<span class="badge b-bl">Study this!</span>'+
+    '</div>'+
+    '<div class="vocab-list-body">'+
+    words.map(function(w){
+      return '<div class="vocab-word-row">'+
+        '<div>'+
+          '<div class="vocab-word">'+w.word+'</div>'+
+          (w.partOfSpeech?'<div class="vocab-pos">'+w.partOfSpeech+'</div>':'')+
+        '</div>'+
+        '<div class="vocab-def">'+
+          w.definition+
+          (w.example?'<div class="vocab-example">"'+w.example+'"</div>':'')+
+        '</div>'+
+      '</div>';
+    }).join('')+
+    '</div></div>';
+  el.innerHTML=h;
+}
+
+function checkVocabTest(assignment, el){
+  if(!assignment.testId){ el.innerHTML='<div style="text-align:center;padding:24px;color:var(--mu)"><div style="font-size:32px;margin-bottom:8px">🔤</div>No vocabulary test scheduled.</div>'; return; }
+  db.collection('vocab_tests').doc(assignment.testId).get().then(function(d){
+    if(!d.exists){ el.innerHTML='<div style="color:var(--mu);font-size:13px">Test not found.</div>'; return; }
+    var test = d.data();
+    var now = new Date();
+    var opens = test.opensAt?(test.opensAt.toDate?test.opensAt.toDate():new Date(test.opensAt)):null;
+    var closes = test.closesAt?(test.closesAt.toDate?test.closesAt.toDate():new Date(test.closesAt)):null;
+    var isOpen = opens&&closes&&now>=opens&&now<=closes;
+    var isUpcoming = opens&&now<opens;
+    var isClosed = closes&&now>closes;
+    // Check if already completed
+    db.collection('vocab_results')
+      .where('studentId','==',CU.uid)
+      .where('testId','==',assignment.testId)
+      .get().then(function(rs){
+        var completed = !rs.empty;
+        var result = completed?rs.docs[0].data():null;
+        renderVocabTestCard(test, assignment.testId, isOpen, isUpcoming, isClosed, completed, result, el);
+      });
+  });
+}
+
+function renderVocabTestCard(test, testId, isOpen, isUpcoming, isClosed, completed, result, el){
+  var opens = test.opensAt?(test.opensAt.toDate?test.opensAt.toDate():new Date(test.opensAt)):null;
+  var closes = test.closesAt?(test.closesAt.toDate?test.closesAt.toDate():new Date(test.closesAt)):null;
+  var fmt = function(d){ return d?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' '+d.toLocaleDateString():'—'; };
+  var h='<div class="vocab-test-card" '+(isOpen&&!completed?'onclick="startVocabTest(\''+testId+'\')"':'')+'>'+
+    '<div style="padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--b)">'+
+      '<div style="font-size:24px">✏️</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:14px;font-weight:600">'+test.title+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+( test.questionCount||0)+' questions · '+( test.timeLimit||15)+' minutes</div>'+
+      '</div>'+
+      (completed?'<span class="vocab-test-status vts-completed">✓ Completed</span>':
+       isOpen?'<span class="vocab-test-status vts-open">🟢 Open now</span>':
+       isUpcoming?'<span class="vocab-test-status vts-upcoming">🕐 Upcoming</span>':
+       '<span class="vocab-test-status vts-closed">Closed</span>')+
+    '</div>'+
+    '<div style="padding:12px 18px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--mu)">'+
+      '<div>📅 Opens: <strong>'+fmt(opens)+'</strong></div>'+
+      '<div>⏰ Closes: <strong>'+fmt(closes)+'</strong></div>'+
+    '</div>'+
+    (completed&&result?
+      '<div style="padding:12px 18px;background:var(--grl);border-top:1px solid var(--b);display:flex;align-items:center;gap:16px">'+
+        '<div style="font-size:28px;font-weight:800;color:var(--gr)">'+result.score+'%</div>'+
+        '<div>'+
+          '<div style="font-size:13px;font-weight:600;color:var(--gr)">'+result.correct+' / '+result.total+' correct</div>'+
+          '<div style="font-size:12px;color:var(--mu)">Completed '+( result.completedAt?(result.completedAt.toDate?result.completedAt.toDate().toLocaleString():''):'')+'</div>'+
+        '</div>'+
+      '</div>':
+     isOpen&&!completed?
+      '<div style="padding:10px 18px;background:var(--bll);border-top:1px solid var(--b);font-size:13px;color:var(--bl);font-weight:500">'+
+        'Tap to start the vocabulary test →'+
+      '</div>':'')+
+    '</div>';
+  el.innerHTML=h;
+}
+
+// ── TEXTBOOKS ──
+function loadStudentTextbooks(){
+  var el = document.getElementById('s-textbooks-list');
+  if(!el) return;
+  // For now show placeholder — will connect to book library later
+  el.innerHTML=
+    '<div style="text-align:center;padding:40px;color:var(--mu)">'+
+      '<div style="font-size:48px;margin-bottom:12px">📖</div>'+
+      '<div style="font-size:15px;font-weight:600;margin-bottom:6px">Textbook library coming soon</div>'+
+      '<div style="font-size:13px;line-height:1.6">Your teacher or admin will assign textbooks here.<br>You\'ll be able to read them anytime.</div>'+
+    '</div>';
+}
+
+// ── VOCAB TEST TAKING (placeholder — full build after format is decided) ──
+function startVocabTest(testId){
+  showToast('Loading vocabulary test...');
+  db.collection('vocab_tests').doc(testId).get().then(function(d){
+    if(!d.exists){ showToast('Test not found.','err'); return; }
+    var test = d.data();
+    // Check if still open
+    var now = new Date();
+    var closes = test.closesAt?(test.closesAt.toDate?test.closesAt.toDate():new Date(test.closesAt)):null;
+    if(closes&&now>closes){ showToast('This test has already closed.','err'); return; }
+    // Will launch vocab test screen — to be built after format is decided
+    showToast('Vocabulary test format coming soon!');
+  });
+}
+
+// ── ADMIN/TEACHER: Vocabulary management ──
+// Add vocab section to teacher panel
+function loadTeacherVocab(){
+  var el = document.getElementById('ta-vocab');
+  if(!el) return;
+  el.innerHTML=
+    '<div style="font-size:18px;font-weight:600;margin-bottom:16px">Vocabulary Management</div>'+
+    '<div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">'+
+      '<button class="btn btn-p" onclick="openCreateVocabList()">+ Create vocabulary list</button>'+
+      '<button class="btn btn-p" onclick="openCreateVocabTest()">+ Create vocabulary test</button>'+
+    '</div>'+
+    '<div style="font-size:14px;font-weight:600;margin-bottom:12px">Vocabulary lists</div>'+
+    '<div id="vocab-lists-admin"><div style="color:var(--mu);font-size:13px">Loading...</div></div>'+
+    '<div class="dv" style="margin:20px 0"></div>'+
+    '<div style="font-size:14px;font-weight:600;margin-bottom:12px">Vocabulary tests</div>'+
+    '<div id="vocab-tests-admin"><div style="color:var(--mu);font-size:13px">Loading...</div></div>';
+  loadVocabListsAdmin();
+  loadVocabTestsAdmin();
+}
+
+function loadVocabListsAdmin(){
+  var el = document.getElementById('vocab-lists-admin');
+  if(!el) return;
+  db.collection('vocab_lists')
+    .where('createdBy','==',CU.uid)
+    .get().then(function(snap){
+      if(snap.empty){
+        el.innerHTML='<div style="color:var(--mu);font-size:13px;padding:16px;background:var(--bg);border-radius:var(--r)">No vocabulary lists yet. Create one above.</div>';
+        return;
+      }
+      var h='';
+      snap.forEach(function(d){
+        var v=d.data();
+        h+='<div class="vocab-list-card" style="margin-bottom:10px">'+
+          '<div class="vocab-list-hdr">'+
+            '<div style="font-size:20px">📖</div>'+
+            '<div style="flex:1">'+
+              '<div style="font-size:14px;font-weight:600">'+v.title+'</div>'+
+              '<div style="font-size:12px;color:var(--mu)">'+(v.words?v.words.length:0)+' words · '+(v.level||'All levels')+' · '+(v.course||'')+'</div>'+
+            '</div>'+
+            '<button class="btn btn-sm" onclick="openEditVocabList(\''+d.id+'\')">✏️ Edit</button>'+
+            '<button class="btn btn-sm btn-p" style="margin-left:6px" onclick="openAssignVocab(\''+d.id+'\',\''+escHTMLCm(v.title)+'\')">👥 Assign</button>'+
+          '</div>'+
+        '</div>';
+      });
+      el.innerHTML=h;
+    }).catch(function(){ el.innerHTML='<div style="color:var(--mu);font-size:13px">Could not load lists.</div>'; });
+}
+
+function loadVocabTestsAdmin(){
+  var el = document.getElementById('vocab-tests-admin');
+  if(!el) return;
+  db.collection('vocab_tests')
+    .where('createdBy','==',CU.uid)
+    .get().then(function(snap){
+      if(snap.empty){
+        el.innerHTML='<div style="color:var(--mu);font-size:13px;padding:16px;background:var(--bg);border-radius:var(--r)">No vocabulary tests yet. Create one above.</div>';
+        return;
+      }
+      var h='';
+      snap.forEach(function(d){
+        var t=d.data();
+        var opens=t.opensAt?(t.opensAt.toDate?t.opensAt.toDate():new Date(t.opensAt)):null;
+        var closes=t.closesAt?(t.closesAt.toDate?t.closesAt.toDate():new Date(t.closesAt)):null;
+        var now=new Date();
+        var status=opens&&closes?(now>=opens&&now<=closes?'🟢 Open':now<opens?'🕐 Upcoming':'⛔ Closed'):'⚙️ Draft';
+        h+='<div style="background:var(--s);border:1px solid var(--b);border-radius:var(--rl);padding:14px 18px;margin-bottom:10px;display:flex;align-items:center;gap:12px">'+
+          '<div style="font-size:20px">✏️</div>'+
+          '<div style="flex:1">'+
+            '<div style="font-size:14px;font-weight:600">'+t.title+'</div>'+
+            '<div style="font-size:12px;color:var(--mu)">'+(t.questionCount||0)+' questions · '+(t.timeLimit||15)+' min · '+status+'</div>'+
+            (opens?'<div style="font-size:11px;color:var(--hi)">Opens: '+opens.toLocaleString()+' · Closes: '+(closes?closes.toLocaleString():'—')+'</div>':'')+
+          '</div>'+
+          '<button class="btn btn-sm" onclick="editVocabTest(\''+d.id+'\')">✏️ Edit</button>'+
+        '</div>';
+      });
+      el.innerHTML=h;
+    }).catch(function(){ el.innerHTML='<div style="color:var(--mu);font-size:13px">Could not load tests.</div>'; });
+}
+
+// ── Create vocab list modal ──
+function openCreateVocabList(){
+  // Build modal
+  var existing = document.getElementById('mo-vocab-list');
+  if(existing) existing.parentNode.removeChild(existing);
+  var modal = document.createElement('div');
+  modal.className='mo open';
+  modal.id='mo-vocab-list';
+  modal.onclick=function(e){if(e.target===modal)modal.parentNode.removeChild(modal);};
+  modal.innerHTML=
+    '<div class="mb" style="max-width:640px;max-height:90vh;display:flex;flex-direction:column">'+
+    '<div class="mh"><div class="mt">Create vocabulary list</div>'+
+    '<button class="btn btn-sm" onclick="document.getElementById(\'mo-vocab-list\').remove()">✕</button></div>'+
+    '<div class="mbd" style="overflow-y:auto;flex:1">'+
+      '<div class="fr"><label class="fl">List title</label>'+
+      '<input class="inp" id="vl-title" placeholder="e.g. IELTS Academic Vocabulary — Week 1"></div>'+
+      '<div class="fg">'+
+        '<div class="fr"><label class="fl">Course</label>'+
+        '<select class="inp" id="vl-course">'+
+          '<option value="">All courses</option>'+
+          '<option>IELTS Academic</option>'+
+          '<option>IELTS General Training</option>'+
+          '<option>IELTS Standard</option>'+
+          '<option>IELTS Minimum</option>'+
+        '</select></div>'+
+        '<div class="fr"><label class="fl">Level</label>'+
+        '<select class="inp" id="vl-level">'+
+          '<option value="">All levels</option>'+
+          '<option>Beginner</option>'+
+          '<option>Elementary</option>'+
+          '<option>Intermediate</option>'+
+          '<option>Upper Intermediate</option>'+
+          '<option>Advanced</option>'+
+        '</select></div>'+
+      '</div>'+
+      '<div class="fr"><label class="fl">Words</label>'+
+      '<div style="font-size:11px;color:var(--mu);margin-bottom:8px">Add words one by one below, or upload an Excel/Word file.</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+        '<button class="btn btn-sm btn-p" onclick="addVocabWordRow()">+ Add word</button>'+
+        '<button class="btn btn-sm" onclick="document.getElementById(\'vl-file\').click()">📎 Upload file</button>'+
+        '<input type="file" id="vl-file" accept=".xlsx,.docx,.csv" style="display:none" onchange="handleVocabFileUpload(this)">'+
+      '</div>'+
+      '<div id="vl-words-list" style="border:1px solid var(--b);border-radius:var(--r);padding:10px;min-height:80px;background:var(--bg)">'+
+        '<div style="color:var(--mu);font-size:12px;text-align:center;padding:20px">No words yet. Add words above.</div>'+
+      '</div></div>'+
+    '</div>'+
+    '<div class="mf">'+
+      '<button class="btn" onclick="document.getElementById(\'mo-vocab-list\').remove()">Cancel</button>'+
+      '<button class="btn btn-p" onclick="saveVocabList()">💾 Save list</button>'+
+    '</div></div>';
+  document.body.appendChild(modal);
+  window._vocabWords = [];
+}
+
+var _vocabWordCount = 0;
+function addVocabWordRow(word, pos, def, example){
+  _vocabWordCount++;
+  var id = 'vw-'+_vocabWordCount;
+  var listEl = document.getElementById('vl-words-list');
+  if(!listEl) return;
+  // Clear empty state
+  if(listEl.querySelector('[style*="No words"]')) listEl.innerHTML='';
+  var row = document.createElement('div');
+  row.id = id;
+  row.style.cssText='display:grid;grid-template-columns:1fr 100px 1fr 1fr auto;gap:6px;margin-bottom:8px;align-items:start';
+  row.innerHTML=
+    '<input class="inp" placeholder="Word *" value="'+(word||'')+'" style="font-weight:600">'+
+    '<input class="inp" placeholder="Part of speech" value="'+(pos||'')+'">'+
+    '<input class="inp" placeholder="Definition *" value="'+(def||'')+'">'+
+    '<input class="inp" placeholder="Example sentence" value="'+(example||'')+'">'+
+    '<button onclick="document.getElementById(\''+id+'\').remove()" class="btn btn-sm btn-d" style="height:38px">🗑</button>';
+  listEl.appendChild(row);
+}
+
+function handleVocabFileUpload(inp){
+  if(!inp.files||!inp.files[0]) return;
+  showToast('Parsing file...');
+  // Simple CSV parsing for now
+  var f = inp.files[0];
+  if(f.name.endsWith('.csv')){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var lines = e.target.result.split('\n');
+      var listEl = document.getElementById('vl-words-list');
+      if(listEl) listEl.innerHTML='';
+      _vocabWordCount=0;
+      lines.forEach(function(line, i){
+        if(i===0||!line.trim()) return; // skip header
+        var cols = line.split(',').map(function(c){ return c.trim().replace(/^"|"$/g,''); });
+        if(cols[0]) addVocabWordRow(cols[0],cols[1]||'',cols[2]||'',cols[3]||'');
+      });
+      showToast('File imported! Check and edit words below.');
+    };
+    reader.readAsText(f);
+  } else {
+    showToast('CSV files supported for now. Format: Word, Part of Speech, Definition, Example','err');
+  }
+  inp.value='';
+}
+
+function saveVocabList(){
+  var title = (document.getElementById('vl-title')||{}).value||'';
+  if(!title){ showToast('Please enter a list title.','err'); return; }
+  // Collect words from rows
+  var rows = document.querySelectorAll('#vl-words-list > div[id^="vw-"]');
+  var words = [];
+  rows.forEach(function(row){
+    var inputs = row.querySelectorAll('input');
+    var word = inputs[0]&&inputs[0].value.trim();
+    var pos = inputs[1]&&inputs[1].value.trim();
+    var def = inputs[2]&&inputs[2].value.trim();
+    var example = inputs[3]&&inputs[3].value.trim();
+    if(word&&def) words.push({word:word,partOfSpeech:pos,definition:def,example:example});
+  });
+  if(!words.length){ showToast('Please add at least one word.','err'); return; }
+  var data = {
+    title: title,
+    course: (document.getElementById('vl-course')||{}).value||'',
+    level: (document.getElementById('vl-level')||{}).value||'',
+    words: words,
+    createdBy: CU.uid,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('vocab_lists').add(data).then(function(){
+    showToast('✓ Vocabulary list saved! ('+words.length+' words)');
+    document.getElementById('mo-vocab-list').remove();
+    loadVocabListsAdmin();
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── Create vocab test modal ──
+function openCreateVocabTest(){
+  var existing = document.getElementById('mo-vocab-test');
+  if(existing) existing.parentNode.removeChild(existing);
+  // Load vocab lists for selection
+  db.collection('vocab_lists').where('createdBy','==',CU.uid).get().then(function(snap){
+    var listOptions = '<option value="">Select a vocabulary list...</option>';
+    snap.forEach(function(d){
+      var v=d.data();
+      listOptions+='<option value="'+d.id+'">'+v.title+' ('+( v.words?v.words.length:0)+' words)</option>';
+    });
+    var modal = document.createElement('div');
+    modal.className='mo open';
+    modal.id='mo-vocab-test';
+    modal.onclick=function(e){if(e.target===modal)modal.parentNode.removeChild(modal);};
+    modal.innerHTML=
+      '<div class="mb" style="max-width:540px">'+
+      '<div class="mh"><div class="mt">Create vocabulary test</div>'+
+      '<button class="btn btn-sm" onclick="document.getElementById(\'mo-vocab-test\').remove()">✕</button></div>'+
+      '<div class="mbd">'+
+        '<div class="fr"><label class="fl">Test title</label>'+
+        '<input class="inp" id="vt-title" placeholder="e.g. Vocabulary Test — Week 1"></div>'+
+        '<div class="fr"><label class="fl">Vocabulary list</label>'+
+        '<select class="inp" id="vt-list">'+listOptions+'</select></div>'+
+        '<div class="fg">'+
+          '<div class="fr"><label class="fl">Number of questions</label>'+
+          '<input class="inp" type="number" id="vt-qcount" value="20" min="5" max="50" style="width:100px"></div>'+
+          '<div class="fr"><label class="fl">Time limit (minutes)</label>'+
+          '<input class="inp" type="number" id="vt-time" value="15" min="5" max="60" style="width:100px"></div>'+
+        '</div>'+
+        '<div class="fg">'+
+          '<div class="fr"><label class="fl">Opens at</label>'+
+          '<input class="inp" type="datetime-local" id="vt-opens"></div>'+
+          '<div class="fr"><label class="fl">Closes at</label>'+
+          '<input class="inp" type="datetime-local" id="vt-closes"></div>'+
+        '</div>'+
+        '<div class="fr"><label class="fl">Assign to students</label>'+
+        '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+          '<button class="btn btn-sm btn-p" onclick="selAllVtStudents(true)">Select all</button>'+
+          '<button class="btn btn-sm" onclick="selAllVtStudents(false)">Deselect all</button>'+
+        '</div>'+
+        '<div id="vt-student-list" style="border:1px solid var(--b);border-radius:var(--r);max-height:200px;overflow-y:auto">'+
+          buildVtStudentList()+
+        '</div></div>'+
+      '</div>'+
+      '<div class="mf">'+
+        '<button class="btn" onclick="document.getElementById(\'mo-vocab-test\').remove()">Cancel</button>'+
+        '<button class="btn btn-p" onclick="saveVocabTest()">💾 Create test</button>'+
+      '</div></div>';
+    document.body.appendChild(modal);
+    // Set default times — opens now, closes in 12 hours
+    var now = new Date();
+    var closes = new Date(now.getTime()+12*60*60*1000);
+    var fmt = function(d){ return d.toISOString().slice(0,16); };
+    var opensEl = document.getElementById('vt-opens');
+    var closesEl = document.getElementById('vt-closes');
+    if(opensEl) opensEl.value = fmt(now);
+    if(closesEl) closesEl.value = fmt(closes);
+  });
+}
+
+var _vtSelectedStudents = new Set();
+function buildVtStudentList(){
+  var students = allUsers.filter(function(u){ return u.role==='student'; });
+  if(!students.length) return '<div style="padding:12px;color:var(--mu);font-size:13px">No students registered yet.</div>';
+  return students.map(function(u){
+    var ini=(u.name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    return '<div class="student-row" id="vtsr-'+u.id+'" onclick="togVtStudent(\''+u.id+'\')">'+
+      '<input type="checkbox" id="vtscb-'+u.id+'" onclick="event.stopPropagation();togVtStudent(\''+u.id+'\')">'+
+      '<div class="student-avatar">'+ini+'</div>'+
+      '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+u.name+'</div>'+
+      '<div style="font-size:12px;color:var(--mu)">'+u.email+'</div></div>'+
+      '</div>';
+  }).join('');
+}
+
+function togVtStudent(id){
+  if(_vtSelectedStudents.has(id)) _vtSelectedStudents.delete(id);
+  else _vtSelectedStudents.add(id);
+  var row=document.getElementById('vtsr-'+id);
+  var cb=document.getElementById('vtscb-'+id);
+  if(row) row.classList.toggle('selected',_vtSelectedStudents.has(id));
+  if(cb) cb.checked=_vtSelectedStudents.has(id);
+}
+
+function selAllVtStudents(sel){
+  allUsers.filter(function(u){return u.role==='student';}).forEach(function(u){
+    if(sel) _vtSelectedStudents.add(u.id);
+    else _vtSelectedStudents.delete(u.id);
+    var row=document.getElementById('vtsr-'+u.id);
+    var cb=document.getElementById('vtscb-'+u.id);
+    if(row) row.classList.toggle('selected',sel);
+    if(cb) cb.checked=sel;
+  });
+}
+
+function saveVocabTest(){
+  var title=(document.getElementById('vt-title')||{}).value||'';
+  var listId=(document.getElementById('vt-list')||{}).value||'';
+  var qcount=parseInt((document.getElementById('vt-qcount')||{}).value)||20;
+  var timeLimit=parseInt((document.getElementById('vt-time')||{}).value)||15;
+  var opensVal=(document.getElementById('vt-opens')||{}).value||'';
+  var closesVal=(document.getElementById('vt-closes')||{}).value||'';
+  if(!title){showToast('Please enter a test title.','err');return;}
+  if(!listId){showToast('Please select a vocabulary list.','err');return;}
+  if(!opensVal||!closesVal){showToast('Please set opening and closing times.','err');return;}
+  if(!_vtSelectedStudents.size){showToast('Please select at least one student.','err');return;}
+  var data={
+    title:title,
+    vocabListId:listId,
+    questionCount:qcount,
+    timeLimit:timeLimit,
+    opensAt:firebase.firestore.Timestamp.fromDate(new Date(opensVal)),
+    closesAt:firebase.firestore.Timestamp.fromDate(new Date(closesVal)),
+    studentIds:Array.from(_vtSelectedStudents),
+    createdBy:CU.uid,
+    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+  };
+  // Save test
+  db.collection('vocab_tests').add(data).then(function(ref){
+    // Create assignment linking list to students with this test
+    return db.collection('vocab_assignments').add({
+      vocabListId:listId,
+      testId:ref.id,
+      studentIds:Array.from(_vtSelectedStudents),
+      createdBy:CU.uid,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }).then(function(){
+    showToast('✓ Vocabulary test created and assigned!');
+    _vtSelectedStudents=new Set();
+    document.getElementById('mo-vocab-test').remove();
+    loadVocabTestsAdmin();
+  }).catch(function(e){showToast('Error: '+e.message,'err');});
+}
+
+// ── Add Vocabulary nav to teacher sidebar ──
+var _prevTN5=tN;
+tN=function(page,el){
+  _prevTN5(page,el);
+  if(page==='vocab') loadTeacherVocab();
+};
+
+console.log('JIC IELTS — Student tabs + Vocabulary infrastructure loaded ✓');
+</script>
