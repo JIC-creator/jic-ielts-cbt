@@ -16772,3 +16772,545 @@ tN=function(page,el){
 
 console.log('JIC IELTS — Student tabs + Vocabulary infrastructure loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  PRACTICE MODE
+//  Phase 4-5: Teacher opens test for practice
+//  Student freely navigates, timer optional,
+//  scores shown live but NOT recorded
+// ═══════════════════════════════════════════════
+
+var practiceModeCSS = document.createElement('style');
+practiceModeCSS.textContent = `
+/* Practice mode banner */
+.practice-banner {
+  background: linear-gradient(135deg, #1a1a2e, #16213e);
+  color: #fff;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.practice-badge {
+  background: rgba(253,197,0,.2);
+  color: #FDC500;
+  border: 1px solid #FDC500;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: .5px;
+}
+.practice-score-live {
+  background: var(--grl);
+  border: 1px solid var(--gr);
+  border-radius: var(--rl);
+  padding: 16px 20px;
+  margin: 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.practice-score-num {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--gr);
+  line-height: 1;
+}
+.practice-score-band {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--gr);
+}
+
+/* Module picker for practice */
+.practice-module-card {
+  background: var(--s);
+  border: 1px solid var(--b);
+  border-radius: var(--rl);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.practice-module-card:hover { border-color: var(--bl); background: var(--bll); }
+.practice-timer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border-radius: var(--r);
+  margin-bottom: 16px;
+  border: 1px solid var(--b);
+}
+`;
+document.head.appendChild(practiceModeCSS);
+
+// ── TEACHER: Add "Open for practice" button to results ──
+var _prevRendTeacherResults4 = rendTeacherResults;
+rendTeacherResults = function(results){
+  // Deduplicate
+  var seen={}, deduped=[];
+  results.sort(function(a,b){
+    var ta=a.submittedAt?(a.submittedAt.toDate?a.submittedAt.toDate().getTime():0):0;
+    var tb=b.submittedAt?(b.submittedAt.toDate?b.submittedAt.toDate().getTime():0):0;
+    return tb-ta;
+  });
+  results.forEach(function(r){
+    var key=(r.studentId||'')+'_'+(r.testId||'')+'_'+(r.module||'');
+    if(!seen[key]){ seen[key]=true; deduped.push(r); }
+  });
+
+  var el = document.getElementById('t-results-list');
+  if(!el) return;
+  if(!deduped.length){
+    el.innerHTML='<div style="text-align:center;padding:32px;color:var(--mu)">'+
+      '<div style="font-size:36px;margin-bottom:8px">📊</div>No results yet.</div>';
+    return;
+  }
+
+  // Group by student+test
+  var grouped = {};
+  deduped.forEach(function(r){
+    var key = (r.studentId||'')+'_'+(r.testId||'');
+    if(!grouped[key]) grouped[key]={
+      studentId:r.studentId, studentName:r.studentName,
+      testId:r.testId, testName:r.testName, testType:r.testType||'Academic',
+      modules:[], practiceOpen:r.practiceOpen||false
+    };
+    grouped[key].modules.push(r);
+    if(r.practiceOpen) grouped[key].practiceOpen=true;
+  });
+
+  el.innerHTML = Object.keys(grouped).map(function(key){
+    var g = grouped[key];
+    var allReleased = g.modules.every(function(m){ return m.released; });
+    var ini = (g.studentName||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().substring(0,2);
+    var h = '<div style="background:var(--s);border:1px solid var(--b);border-radius:var(--rl);margin-bottom:16px;overflow:hidden">';
+    // Student header
+    h += '<div style="padding:14px 18px;background:var(--bg);border-bottom:1px solid var(--b);display:flex;align-items:center;gap:12px">'+
+      '<div style="width:40px;height:40px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">'+ini+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:15px;font-weight:700">'+g.studentName+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+g.testName+' · '+g.testType+'</div>'+
+      '</div>'+
+      (g.practiceOpen?
+        '<span style="background:rgba(253,197,0,.15);color:#FDC500;border:1px solid #FDC500;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">🔓 Practice open</span>':
+        (allReleased?
+          '<button class="btn btn-p btn-sm" onclick="openForPractice(\''+g.studentId+'\',\''+g.testId+'\')">🔓 Open for practice</button>':
+          '<span style="font-size:12px;color:var(--mu)">Release all scores first</span>'))+
+    '</div>';
+
+    // Module results
+    g.modules.forEach(function(r){
+      var mod=r.module||'';
+      var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+      var isWriting=mod==='writing';
+      var band=(!isWriting)?getBand(r.correct,mod,g.testType):null;
+      var submitted='';
+      try{ var dt=r.submittedAt?(r.submittedAt.toDate?r.submittedAt.toDate():new Date(r.submittedAt)):null; if(dt) submitted=dt.toLocaleString(); }catch(e){}
+
+      h+='<div style="padding:14px 18px;border-bottom:1px solid var(--b)">';
+      h+='<div style="display:flex;align-items:center;gap:12px;margin-bottom:'+(isWriting?'12':'0')+'px">';
+      h+='<div style="font-size:22px">'+( icons[mod]||'📝')+'</div>';
+      h+='<div style="flex:1">'+
+        '<div style="font-size:13px;font-weight:600">'+mod.charAt(0).toUpperCase()+mod.slice(1)+'</div>'+
+        '<div style="font-size:11px;color:var(--hi)">'+submitted+'</div>'+
+      '</div>';
+      if(!isWriting){
+        if(band!==null){
+          h+='<div style="text-align:center;background:'+bandBg(band)+';padding:6px 14px;border-radius:var(--r)">'+
+            '<div style="font-size:20px;font-weight:800;color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>'+
+            '<div style="font-size:10px;color:'+bandColor(band)+'">Band</div>'+
+          '</div>';
+        }
+        h+='<div style="text-align:center;padding:0 12px">'+
+          '<div style="font-size:18px;font-weight:700">'+(r.correct||0)+'/40</div>'+
+          '<div style="font-size:10px;color:var(--mu)">correct</div>'+
+        '</div>';
+        h+='<button class="btn '+(r.released?'btn-sm':'btn-sm btn-p')+'" '+
+          'style="'+(r.released?'background:var(--grl);color:var(--gr);border-color:var(--gr)':'')+'" '+
+          'onclick="releaseResult(\''+r.id+'\',\''+mod+'\')">'+(r.released?'✓ Released':'📤 Release')+'</button>';
+      }
+      h+='</div>';
+
+      if(isWriting){
+        if(r.writingTask1||r.writingTask2){
+          h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+          if(r.writingTask1) h+='<div><div style="font-size:11px;font-weight:600;color:var(--mu);margin-bottom:4px">TASK 1 ('+countWords2(r.writingTask1)+' words)</div><div class="writing-review-box">'+escHTMLCm(r.writingTask1)+'</div></div>';
+          if(r.writingTask2) h+='<div><div style="font-size:11px;font-weight:600;color:var(--mu);margin-bottom:4px">TASK 2 ('+countWords2(r.writingTask2)+' words)</div><div class="writing-review-box">'+escHTMLCm(r.writingTask2)+'</div></div>';
+          h+='</div>';
+        }
+        h+='<div style="background:var(--bg);border-radius:var(--r);padding:12px;border:1px solid var(--b)">'+
+          '<div style="font-size:12px;font-weight:600;margin-bottom:10px">Teacher grading</div>'+
+          '<div style="display:grid;grid-template-columns:160px 1fr;gap:12px">'+
+          '<div><label class="fl" style="margin-bottom:4px">Band score</label>'+
+          '<input class="inp" type="number" id="w-grade-'+r.id+'" value="'+(r.writingBand||'')+'" min="1" max="9" step="0.5" placeholder="e.g. 6.5" style="width:90px;font-size:18px;font-weight:700;text-align:center"></div>'+
+          '<div><label class="fl" style="margin-bottom:4px">Feedback / comments</label>'+
+          '<textarea class="inp" id="w-feedback-'+r.id+'" rows="4" placeholder="Write feedback...">'+escHTMLCm(r.teacherFeedback||'')+'</textarea></div>'+
+          '</div>'+
+          '<div style="display:flex;justify-content:flex-end;margin-top:10px">'+
+          '<button class="btn '+(r.released?'':'btn-p')+'" style="'+(r.released?'background:var(--grl);color:var(--gr);border-color:var(--gr)':'')+'" '+
+          'onclick="releaseWritingResult(\''+r.id+'\')">'+(r.released?'✓ Update & release':'📤 Grade & release')+'</button>'+
+          '</div></div>';
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+    return h;
+  }).join('');
+};
+
+// ── Open test for practice ──
+function openForPractice(studentId, testId){
+  if(!confirm('Open this test for practice mode? The student will be able to freely navigate and redo the test without recording scores.')) return;
+  // Mark all results for this student+test as practiceOpen
+  db.collection('results')
+    .where('studentId','==',studentId)
+    .where('testId','==',testId)
+    .get()
+    .then(function(snap){
+      var batch = db.batch();
+      snap.forEach(function(d){ batch.update(d.ref,{practiceOpen:true}); });
+      return batch.commit();
+    })
+    .then(function(){
+      showToast('✓ Test opened for practice! Student can now freely navigate.');
+      loadTeacherResults();
+      // Notify student
+      db.collection('notifications').add({
+        userId: studentId,
+        type: 'practice_open',
+        testId: testId,
+        read: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(function(){});
+    })
+    .catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// ── STUDENT: Show practice mode on test cards ──
+var _prevRendStudentTests2 = rendStudentTests;
+rendStudentTests = function(tests){
+  var el = document.getElementById('s-tests');
+  if(!el) return;
+  if(!tests.length){
+    el.innerHTML='<div style="color:var(--mu);font-size:13px;padding:20px;text-align:center">'+
+      '<div style="font-size:32px;margin-bottom:8px">📋</div>No tests assigned yet.</div>';
+    return;
+  }
+  tests.sort(function(a,b){
+    var da=a.assignment&&a.assignment.dueDate||'9999';
+    var db2=b.assignment&&b.assignment.dueDate||'9999';
+    return da<db2?-1:1;
+  });
+  el.innerHTML = tests.map(function(t){
+    var asgn=t.assignment;
+    var modules=asgn.modules||{};
+    var dueStr=asgn.dueDate||'';
+    var dueBadge='';
+    if(dueStr){
+      var due=new Date(dueStr),now=new Date(),diff=Math.ceil((due-now)/(1000*60*60*24));
+      if(diff<0) dueBadge='<span class="due-badge overdue">⚠️ Overdue</span>';
+      else if(diff<=3) dueBadge='<span class="due-badge soon">⏰ Due in '+diff+' day'+(diff===1?'':'s')+'</span>';
+      else dueBadge='<span class="due-badge ok">📅 Due '+due.toLocaleDateString()+'</span>';
+    }
+    var modeTag=asgn.mode==='full'?
+      '<span class="badge b-pu" style="font-size:11px">Full test</span>':
+      '<span class="badge b-bl" style="font-size:11px">Skill practice</span>';
+    var modTiles=['listening','reading','writing'].map(function(m){
+      var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+      var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+      var avail=modules[m];
+      return '<div style="text-align:center;padding:8px;border-radius:var(--r);border:1px solid var(--b);'+
+        'background:'+(avail?'var(--s)':'var(--bg)')+';opacity:'+(avail?1:.45)+'">'+
+        '<div style="font-size:18px;margin-bottom:2px">'+icons[m]+(avail?'':'🔒')+'</div>'+
+        '<div style="font-size:11px;font-weight:500;color:'+(avail?'var(--t)':'var(--mu)')+'">'+labels[m]+'</div>'+
+        '</div>';
+    }).join('');
+    return '<div class="card" style="margin-bottom:12px">'+
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:10px">'+
+        '<div>'+
+          '<div style="font-size:15px;font-weight:700;margin-bottom:4px">'+t.name+'</div>'+
+          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+
+            '<span style="font-size:12px;color:var(--mu)">'+t.type+'</span>'+modeTag+
+          '</div>'+
+        '</div>'+dueBadge+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">'+modTiles+'</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn btn-p" style="flex:1" onclick="openTestModulePicker(\''+t.id+'\')">▶ Start test</button>'+
+        '<button class="btn" onclick="openClassroom(\''+t.id+'\')">🏫 Classroom</button>'+
+        // Practice mode button — check if opened
+        '<button class="btn" id="practice-btn-'+t.id+'" style="display:none" onclick="openPracticeModePicker(\''+t.id+'\')">🔓 Practice</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  window._studentTests = tests;
+  // Check practice availability for each test
+  tests.forEach(function(t){ checkPracticeAvailable(t.id); });
+};
+
+function checkPracticeAvailable(testId){
+  if(!CU) return;
+  db.collection('results')
+    .where('studentId','==',CU.uid)
+    .where('testId','==',testId)
+    .where('practiceOpen','==',true)
+    .get()
+    .then(function(snap){
+      if(!snap.empty){
+        var btn=document.getElementById('practice-btn-'+testId);
+        if(btn) btn.style.display='inline-flex';
+      }
+    }).catch(function(){});
+}
+
+// ── Practice mode picker ──
+function openPracticeModePicker(testId){
+  var tests=window._studentTests||[];
+  var t=tests.find(function(x){return x.id===testId;});
+  if(!t){ showToast('Test not found.','err'); return; }
+  curTid=testId; tdata=t; currentAssignment=t.assignment;
+  // Load content
+  db.collection('tests').doc(testId).collection('content').doc('data').get().then(function(c){
+    if(!TC) TC={};
+    if(c.exists) TC[testId]=normalizeTC(c.data());
+    showPracticeModePicker(testId,t);
+  });
+}
+
+function showPracticeModePicker(testId, t){
+  var shome=document.getElementById('shome');
+  var spick=document.getElementById('spick');
+  if(!shome||!spick) return;
+
+  var h='<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'+
+    '<button class="btn btn-sm" onclick="backToStudentHome()">← Back</button>'+
+    '<div style="font-size:18px;font-weight:600">'+t.name+'</div>'+
+    '<span style="background:rgba(253,197,0,.15);color:#FDC500;border:1px solid #FDC500;font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">🔓 Practice mode</span>'+
+  '</div>';
+
+  // Timer toggle
+  h+='<div class="practice-timer-toggle">'+
+    '<div class="toggle-sw on" id="practice-timer-toggle" onclick="togPracticeTimer()"></div>'+
+    '<div>'+
+      '<div style="font-size:13px;font-weight:500">⏱ Use timer</div>'+
+      '<div style="font-size:12px;color:var(--mu)" id="practice-timer-label">Timer is ON — toggle to practice without time pressure</div>'+
+    '</div>'+
+  '</div>';
+
+  h+='<div style="font-size:13px;color:var(--mu);margin-bottom:16px;padding:10px 14px;background:var(--bg);border-radius:var(--r)">'+
+    '💡 In practice mode, you can freely navigate between modules. Listening and Reading scores are shown instantly but <strong>not recorded</strong>.'+
+  '</div>';
+
+  // Module cards — ALL unlocked
+  var modOrder=['listening','reading','writing'];
+  var icons={listening:'🎧',reading:'📖',writing:'✏️'};
+  var labels={listening:'Listening',reading:'Reading',writing:'Writing'};
+  var times={listening:t.listeningTime||30,reading:t.readingTime||60,writing:t.writingTime||60};
+  var colors={listening:'var(--bll)',reading:'var(--grl)',writing:'var(--aml)'};
+
+  h+='<div>';
+  modOrder.forEach(function(m){
+    h+='<div class="practice-module-card" onclick="startPracticeModule(\''+m+'\')">'+
+      '<div style="width:48px;height:48px;border-radius:var(--r);background:'+colors[m]+';display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">'+icons[m]+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:15px;font-weight:600">'+labels[m]+'</div>'+
+        '<div style="font-size:12px;color:var(--mu);margin-top:2px">'+times[m]+' min · Practice — scores not recorded</div>'+
+      '</div>'+
+      '<span style="font-size:12px;color:var(--mu)">Start →</span>'+
+    '</div>';
+  });
+  h+='</div>';
+
+  shome.style.display='none';
+  spick.style.display='block';
+  spick.innerHTML=h;
+  window._practiceTimerOn=true;
+}
+
+function togPracticeTimer(){
+  window._practiceTimerOn=!window._practiceTimerOn;
+  var sw=document.getElementById('practice-timer-toggle');
+  var lbl=document.getElementById('practice-timer-label');
+  if(sw) sw.className='toggle-sw'+(window._practiceTimerOn?' on':'');
+  if(lbl) lbl.textContent=window._practiceTimerOn?
+    'Timer is ON — toggle to practice without time pressure':
+    'Timer is OFF — practice at your own pace';
+}
+
+function startPracticeModule(mod){
+  testState.testId=curTid;
+  testState.testData=tdata;
+  testState.testContent=TC[curTid];
+  testState.module=mod;
+  testState.answers={};
+  testState.flagged=new Set();
+  testState.curPart=1;
+  testState.curPassage=1;
+  testState.curTask=1;
+  testState.curQIdx=0;
+  testState.assignment=currentAssignment;
+  testState.allowPause=false;
+  testState.isPractice=true; // flag as practice
+  testState.useTimer=window._practiceTimerOn!==false;
+  testState.timeLeft=testState.useTimer?getModuleTime(mod):999999;
+
+  var badges={listening:'🎧 Listening',reading:'📖 Reading',writing:'✏️ Writing'};
+  var colors={listening:'background:var(--bll);color:#0C447C',reading:'background:var(--grl);color:#085041',writing:'background:var(--aml);color:var(--am)'};
+  document.getElementById('test-title').textContent=(tdata&&tdata.name||'Test')+' — Practice';
+  document.getElementById('test-module-badge').textContent=badges[mod]||mod;
+  document.getElementById('test-module-badge').style.cssText=colors[mod]||'';
+
+  // Add practice banner to topbar
+  var topbar=document.getElementById('test-topbar');
+  if(topbar&&!document.getElementById('practice-mode-banner')){
+    var banner=document.createElement('div');
+    banner.id='practice-mode-banner';
+    banner.className='practice-banner';
+    banner.style.cssText='padding:6px 16px;font-size:12px;background:rgba(253,197,0,.1);border-bottom:1px solid rgba(253,197,0,.2)';
+    banner.innerHTML='<span class="practice-badge">🔓 PRACTICE MODE</span>'+
+      '<span style="color:#ccc;font-size:12px;">Scores shown live but not recorded</span>'+
+      (testState.useTimer?'':'<span style="color:#FDC500;font-size:12px;margin-left:8px">⏱ No timer</span>');
+    topbar.parentNode.insertBefore(banner,topbar.nextSibling);
+  }
+
+  // Change submit button text
+  var subBtn=document.getElementById('test-submit-btn');
+  if(subBtn) subBtn.textContent='See score →';
+
+  buildQList();
+  renderTestModule();
+  if(testState.useTimer) startTestTimer();
+  else{
+    // Show static "No timer" display
+    var timerEl=document.getElementById('test-timer');
+    if(timerEl){ timerEl.innerHTML='⏱ No timer'; timerEl.style.background='rgba(253,197,0,.1)'; timerEl.style.color='#FDC500'; timerEl.style.borderColor='#FDC500'; }
+  }
+  showS('test');
+  document.getElementById('test-nav-bar').style.display=mod==='writing'?'none':'flex';
+  document.getElementById('test-flag-btn').style.display=mod==='writing'?'none':'flex';
+}
+
+// ── Override showReview for practice mode ──
+var _prevShowReview=showReview;
+showReview=function(){
+  if(!testState.isPractice){ _prevShowReview(); return; }
+  // For practice — show live score for L/R, or writing summary
+  clearInterval(testState.timerInt);
+  var mod=testState.module;
+  var tc=testState.testContent;
+  var body=document.getElementById('test-body');
+  var correct=0,total=40;
+
+  if(mod==='listening'||mod==='reading'){
+    var groups=[];
+    if(mod==='listening'){
+      for(var s=1;s<=4;s++){var sec=tc.listening&&(tc.listening.sections[s]||tc.listening.sections[String(s)]);(sec&&sec.groups||[]).forEach(function(g){groups.push(g);});}
+    } else {
+      for(var p=1;p<=3;p++){var pas=tc.reading&&(tc.reading.passages[p]||tc.reading.passages[String(p)]);(pas&&pas.groups||[]).forEach(function(g){groups.push(g);});}
+    }
+    groups.forEach(function(g){(g.questions||[]).forEach(function(q){
+      if(!q.answer) return;
+      var sa=String(testState.answers[q.num]||'').trim();
+      if(checkAnswer(sa,q.answer)) correct++;
+    });});
+    var band=getBand(correct,mod,testState.testData&&testState.testData.type||'Academic');
+    body.innerHTML=
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px;text-align:center">'+
+        '<div class="practice-badge" style="margin-bottom:20px;font-size:13px;padding:6px 16px">🔓 PRACTICE RESULT — Not recorded</div>'+
+        '<div class="practice-score-live">'+
+          (band?'<div style="text-align:center;padding:10px 20px;background:'+bandBg(band)+';border-radius:var(--r)">'+
+            '<div class="practice-score-band" style="color:'+bandColor(band)+'">'+band.toFixed(1)+'</div>'+
+            '<div style="font-size:11px;color:'+bandColor(band)+'">Band</div></div>':'')+ 
+          '<div>'+
+            '<div class="practice-score-num">'+correct+'/40</div>'+
+            '<div style="font-size:13px;color:var(--gr);font-weight:500">correct answers</div>'+
+          '</div>'+
+        '</div>'+
+        '<div style="font-size:14px;color:var(--mu);margin:16px 0">This score is for your practice only.</div>'+
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">'+
+          '<button class="btn btn-p" onclick="backToStudentHome()">← Back to tests</button>'+
+          '<button class="btn" onclick="startPracticeModule(\''+mod+'\')">🔄 Redo this module</button>'+
+        '</div>'+
+      '</div>';
+  } else {
+    // Writing practice
+    var wc1=countWords2(testState.answers['w1']||'');
+    var wc2=countWords2(testState.answers['w2']||'');
+    body.innerHTML=
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px;text-align:center">'+
+        '<div class="practice-badge" style="margin-bottom:20px;font-size:13px;padding:6px 16px">🔓 PRACTICE — Writing</div>'+
+        '<div style="font-size:48px;margin-bottom:12px">✏️</div>'+
+        '<div style="font-size:16px;font-weight:600;margin-bottom:16px">Writing practice complete!</div>'+
+        '<div style="display:flex;gap:16px;margin-bottom:20px">'+
+          '<div style="background:var(--bg);border-radius:var(--r);padding:12px 20px;border:1px solid var(--b)">'+
+            '<div style="font-size:24px;font-weight:700">'+wc1+'</div>'+
+            '<div style="font-size:12px;color:var(--mu)">Task 1 words</div>'+
+          '</div>'+
+          '<div style="background:var(--bg);border-radius:var(--r);padding:12px 20px;border:1px solid var(--b)">'+
+            '<div style="font-size:24px;font-weight:700">'+wc2+'</div>'+
+            '<div style="font-size:12px;color:var(--mu)">Task 2 words</div>'+
+          '</div>'+
+        '</div>'+
+        '<div style="font-size:13px;color:var(--mu);margin-bottom:20px">Writing practice is not auto-scored.</div>'+
+        '<div style="display:flex;gap:10px;justify-content:center">'+
+          '<button class="btn btn-p" onclick="backToStudentHome()">← Back to tests</button>'+
+          '<button class="btn" onclick="startPracticeModule(\'writing\')">🔄 Redo Writing</button>'+
+        '</div>'+
+      '</div>';
+  }
+  document.getElementById('test-nav-bar').style.display='none';
+};
+
+// ── Override exitToStudent to clean up practice ──
+var _prevExitToStudent=exitToStudent;
+exitToStudent=function(){
+  // Remove practice banner if present
+  var banner=document.getElementById('practice-mode-banner');
+  if(banner) banner.parentNode.removeChild(banner);
+  testState.isPractice=false;
+  testState.useTimer=true;
+  // Restore submit button
+  var subBtn=document.getElementById('test-submit-btn');
+  if(subBtn) subBtn.textContent='Review & Submit →';
+  _prevExitToStudent();
+};
+
+// ── Student notification for practice open ──
+var _prevRendSNotifications2=rendSNotifications;
+rendSNotifications=function(){
+  var el=document.getElementById('s-notif-list');
+  if(!el) return;
+  if(!sNotifications.length){ el.innerHTML='<div class="notif-empty">No notifications yet.</div>'; return; }
+  el.innerHTML=sNotifications.map(function(n){
+    var time='';
+    try{ var dt=n.createdAt?(n.createdAt.toDate?n.createdAt.toDate():new Date(n.createdAt)):null; if(dt) time=dt.toLocaleString(); }catch(e){}
+    var icon=n.type==='result_released'?'📊':n.type==='practice_open'?'🔓':'📋';
+    var msg=n.type==='result_released'?
+      'Your <strong>'+(n.module||'').charAt(0).toUpperCase()+(n.module||'').slice(1)+'</strong> result for <strong>'+n.testName+'</strong> has been released!':
+      n.type==='practice_open'?
+      '🔓 <strong>Practice mode</strong> is now open for <strong>'+(n.testName||'a test')+'</strong>! You can freely redo the test.':
+      (n.message||'New notification');
+    return '<div class="notif-item'+(n.read?'':' unread')+'" onclick="tapSNotif(\''+n.id+'\',\''+n.type+'\',\''+n.testId+'\')">'+
+      '<div style="display:flex;align-items:flex-start;gap:10px">'+
+        '<span style="font-size:20px;flex-shrink:0">'+icon+'</span>'+
+        '<div style="flex:1">'+
+          '<div class="ni-detail">'+msg+'</div>'+
+          '<div class="ni-time">'+time+'</div>'+
+          (n.type==='practice_open'&&!n.read?
+            '<div style="margin-top:6px"><button class="btn btn-p btn-sm" onclick="event.stopPropagation();tapSNotif(\''+n.id+'\',\''+n.type+'\',\''+n.testId+'\')">Open practice →</button></div>':'')+ 
+        '</div>'+
+      '</div></div>';
+  }).join('');
+};
+
+console.log('JIC IELTS — Practice mode loaded ✓');
+</script>
