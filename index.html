@@ -17314,3 +17314,186 @@ rendSNotifications=function(){
 
 console.log('JIC IELTS — Practice mode loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Practice mode button on student side
+// ═══════════════════════════════════════════════
+
+// Override checkPracticeAvailable with debug + fix
+checkPracticeAvailable = function(testId){
+  if(!CU) return;
+  db.collection('results')
+    .where('studentId','==',CU.uid)
+    .where('testId','==',testId)
+    .get()
+    .then(function(snap){
+      var practiceOpen = false;
+      snap.forEach(function(d){
+        if(d.data().practiceOpen===true) practiceOpen=true;
+      });
+      if(practiceOpen){
+        var btn = document.getElementById('practice-btn-'+testId);
+        if(btn){
+          btn.style.display = 'inline-flex';
+          btn.style.background = 'rgba(253,197,0,.15)';
+          btn.style.color = '#FDC500';
+          btn.style.borderColor = '#FDC500';
+        }
+      }
+    }).catch(function(e){
+      console.error('checkPracticeAvailable error:', e);
+    });
+};
+
+// Override openPracticeModePicker — fix test lookup
+openPracticeModePicker = function(testId){
+  var tests = window._studentTests||[];
+  var t = tests.find(function(x){ return x.id===testId; });
+  if(!t){
+    // Try loading test directly from Firebase
+    showToast('Loading test...');
+    db.collection('tests').doc(testId).get().then(function(d){
+      if(!d.exists){ showToast('Test not found.','err'); return; }
+      var tdata2 = Object.assign({id:d.id}, d.data());
+      // Find assignment
+      db.collection('assignments')
+        .where('studentIds','array-contains',CU.uid)
+        .where('testId','==',testId)
+        .get()
+        .then(function(asnap){
+          var asgn = asnap.empty ? {} : asnap.docs[0].data();
+          tdata2.assignment = asgn;
+          curTid = testId;
+          tdata = tdata2;
+          currentAssignment = asgn;
+          // Load content
+          db.collection('tests').doc(testId)
+            .collection('content').doc('data').get()
+            .then(function(c){
+              if(!TC) TC={};
+              if(c.exists) TC[testId]=normalizeTC(c.data());
+              else TC[testId]={listening:{sections:{}},reading:{passages:{}},writing:{},speaking:{}};
+              showPracticeModePicker(testId, tdata2);
+            });
+        });
+    }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+    return;
+  }
+
+  curTid = testId;
+  tdata = t;
+  currentAssignment = t.assignment;
+
+  showToast('Loading practice mode...');
+  db.collection('tests').doc(testId)
+    .collection('content').doc('data').get()
+    .then(function(c){
+      if(!TC) TC={};
+      if(c.exists) TC[testId]=normalizeTC(c.data());
+      else TC[testId]={listening:{sections:{}},reading:{passages:{}},writing:{},speaking:{}};
+      showPracticeModePicker(testId, t);
+    }).catch(function(e){ showToast('Error loading: '+e.message,'err'); });
+};
+
+// Override showPracticeModePicker — ensure shome/spick exist
+showPracticeModePicker = function(testId, t){
+  var shome = document.getElementById('shome');
+  var spick = document.getElementById('spick');
+
+  // If shome/spick don't exist — we're in tab mode, need to use the tab panel
+  if(!shome||!spick){
+    // Find tests panel and replace content
+    var testsPanel = document.getElementById('spanel-tests');
+    if(!testsPanel){ showToast('Could not open practice mode.','err'); return; }
+    // Save original content
+    window._testsPanelContent = testsPanel.innerHTML;
+    testsPanel.innerHTML = buildPracticePickerHTML(testId, t);
+    return;
+  }
+
+  shome.style.display = 'none';
+  spick.style.display = 'block';
+  spick.innerHTML = buildPracticePickerHTML(testId, t);
+};
+
+function buildPracticePickerHTML(testId, t){
+  var h = '<div style="padding:4px 0">'+
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'+
+      '<button class="btn btn-sm" onclick="exitPracticePicker()">← Back</button>'+
+      '<div style="font-size:18px;font-weight:600">'+(t&&t.name||'Test')+'</div>'+
+      '<span style="background:rgba(253,197,0,.15);color:#FDC500;border:1px solid #FDC500;'+
+        'font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">🔓 Practice mode</span>'+
+    '</div>'+
+
+    // Timer toggle
+    '<div class="practice-timer-toggle">'+
+      '<div class="toggle-sw on" id="practice-timer-toggle" onclick="togPracticeTimer()"></div>'+
+      '<div>'+
+        '<div style="font-size:13px;font-weight:500">⏱ Use timer</div>'+
+        '<div style="font-size:12px;color:var(--mu)" id="practice-timer-label">'+
+          'Timer is ON — toggle off to practice without time pressure</div>'+
+      '</div>'+
+    '</div>'+
+
+    '<div style="font-size:13px;color:var(--mu);margin-bottom:16px;padding:10px 14px;'+
+      'background:var(--bg);border-radius:var(--r);line-height:1.6">'+
+      '💡 <strong>Practice mode</strong> — freely navigate between any module. '+
+      'Listening and Reading scores are shown instantly but <strong>not recorded</strong>.'+
+    '</div>'+
+
+    '<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--mu)">Choose a module to practice:</div>'+
+    '<div>';
+
+  var modOrder = ['listening','reading','writing'];
+  var icons = {listening:'🎧',reading:'📖',writing:'✏️'};
+  var labels = {listening:'Listening',reading:'Reading',writing:'Writing'};
+  var descs = {
+    listening:'Score shown instantly after submitting',
+    reading:'Score shown instantly after submitting',
+    writing:'Practice your writing — no auto-score'
+  };
+  var colors = {listening:'var(--bll)',reading:'var(--grl)',writing:'var(--aml)'};
+
+  modOrder.forEach(function(m){
+    h+='<div class="practice-module-card" onclick="startPracticeModule(\''+m+'\')">'+
+      '<div style="width:50px;height:50px;border-radius:var(--r);background:'+colors[m]+';'+
+        'display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">'+icons[m]+'</div>'+
+      '<div style="flex:1">'+
+        '<div style="font-size:15px;font-weight:600">'+labels[m]+'</div>'+
+        '<div style="font-size:12px;color:var(--mu);margin-top:3px">'+descs[m]+'</div>'+
+      '</div>'+
+      '<span style="font-size:20px;color:var(--mu)">→</span>'+
+    '</div>';
+  });
+
+  h+='</div></div>';
+  return h;
+}
+
+// Exit practice picker — restore original content
+function exitPracticePicker(){
+  var shome = document.getElementById('shome');
+  var spick = document.getElementById('spick');
+  if(shome&&spick){
+    shome.style.display='block';
+    spick.style.display='none';
+    return;
+  }
+  // Tab mode — restore tests panel
+  var testsPanel = document.getElementById('spanel-tests');
+  if(testsPanel&&window._testsPanelContent){
+    testsPanel.innerHTML = window._testsPanelContent;
+    window._testsPanelContent = null;
+    // Re-check practice availability
+    (window._studentTests||[]).forEach(function(t){ checkPracticeAvailable(t.id); });
+  }
+}
+
+// Also wire up backToStudentHome for practice
+var _prevBackToStudentHome = backToStudentHome;
+backToStudentHome = function(){
+  exitPracticePicker();
+};
+
+console.log('JIC IELTS — practice mode button fix loaded ✓');
+</script>
