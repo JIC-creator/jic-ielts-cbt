@@ -17724,3 +17724,288 @@ window.addEventListener('load', function(){
   console.log('JIC IELTS — rename test + writing layout final fix loaded ✓');
 });
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX 1: Auto-scroll to top when switching passages
+//  FIX 2: Move question group to different part
+//  FIX 3: Edit individual question number
+// ═══════════════════════════════════════════════
+
+// ── FIX 1: Auto-scroll when switching passages in student test ──
+var _prevRenderReadingTest = renderReadingTest;
+renderReadingTest = function(body){
+  _prevRenderReadingTest(body);
+  // Scroll both panels to top after render
+  setTimeout(function(){
+    var passSide = body.querySelector('.reading-passage-side');
+    var qSide = body.querySelector('.reading-qs-side');
+    if(passSide) passSide.scrollTop = 0;
+    if(qSide) qSide.scrollTop = 0;
+  }, 50);
+};
+
+// Also fix passage tab switching to scroll to top
+var _prevRenderTestModule = renderTestModule;
+renderTestModule = function(){
+  _prevRenderTestModule();
+  // After render, scroll reading panels to top
+  if(testState.module==='reading'){
+    setTimeout(function(){
+      var body = document.getElementById('test-body');
+      if(!body) return;
+      var passSide = body.querySelector('.reading-passage-side');
+      var qSide = body.querySelector('.reading-qs-side');
+      if(passSide) passSide.scrollTop=0;
+      if(qSide) qSide.scrollTop=0;
+    },50);
+  }
+};
+
+// Also fix classroom reading passage switching
+var _prevShowCMPassage2 = showCMPassage;
+showCMPassage = function(n){
+  _prevShowCMPassage2(n);
+  setTimeout(function(){
+    var pp = document.getElementById('cm-passage-panel');
+    var qp = document.getElementById('cm-reading-qs');
+    if(pp) pp.scrollTop=0;
+    if(qp) qp.scrollTop=0;
+  },50);
+};
+
+// ── FIX 2: Move question group to different part/passage ──
+// Override rendQGCard to add "Move to" button
+var _prevRendQGCard6 = rendQGCard;
+rendQGCard = function(g, gi, mod, sp){
+  var tl=(QTYPES.find(function(t){return t.v===g.type;})||{l:g.type}).l;
+  var qCount=g.summaryText?(g.summaryAnswers&&g.summaryAnswers.length||0):g.questions.length;
+  var isL=mod==='listening';
+  var maxParts=isL?4:3;
+  var partLabel=isL?'Part':'Passage';
+
+  // Build "Move to" options
+  var moveOptions='';
+  for(var i=1;i<=maxParts;i++){
+    if(i!==sp) moveOptions+='<option value="'+i+'">'+partLabel+' '+i+'</option>';
+  }
+
+  var h='<div class="qb" id="qg-card-'+gi+'" draggable="true" '+
+    'ondragstart="qgDragStart(event,'+gi+',\''+mod+'\','+sp+')" '+
+    'ondragover="qgDragOver(event,'+gi+')" '+
+    'ondragleave="qgDragLeave(event,'+gi+')" '+
+    'ondrop="qgDrop(event,'+gi+',\''+mod+'\','+sp+')">';
+
+  h+='<div class="qb-hdr" onclick="togQB(this)">'+
+    '<span class="qb-drag-handle" onclick="event.stopPropagation()">⠿</span>'+
+    '<div class="qb-num">'+(gi+1)+'</div>'+
+    '<div class="qb-title">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>'+
+    '<span class="qtb">'+qCount+' q(s)</span>'+
+    '<div style="margin-left:auto;display:flex;gap:4px;align-items:center">'+
+    // Move to dropdown
+    '<div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px">'+
+      '<select class="inp" style="height:28px;padding:0 6px;font-size:11px;width:auto;color:var(--mu)" '+
+        'onchange="moveQGToPart(\''+mod+'\','+sp+','+gi+',parseInt(this.value));this.value=\'\'" '+
+        'title="Move to different '+partLabel+'">'+
+        '<option value="">Move to...</option>'+
+        moveOptions+
+      '</select>'+
+    '</div>'+
+    '<div class="qb-reorder-btns" onclick="event.stopPropagation()">'+
+      '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',-1)">▲</button>'+
+      '<button class="qb-reorder-btn" onclick="moveQG(\''+mod+'\','+sp+','+gi+',1)">▼</button>'+
+    '</div>'+
+    '<button class="btn btn-sm" onclick="event.stopPropagation();openEditQG(\''+mod+'\','+sp+','+gi+')">✏️ Edit</button>'+
+    '<button class="btn btn-sm btn-d" onclick="event.stopPropagation();rmQG(\''+mod+'\','+sp+','+gi+')">🗑</button>'+
+    '</div></div>';
+
+  h+='<div class="qb-body">';
+  h+='<div style="font-size:12px;color:var(--mu);margin-bottom:6px">'+
+    renderBold(g.instruction||'')+(g.wordLimit?' · <strong>'+g.wordLimit+'</strong>':'')+'</div>';
+
+  if(g.summaryText){
+    var prevTxt=renderBold(g.summaryText).replace(/\[Q(\d+)\]/gi,function(m,qn){
+      return '<span style="background:var(--bll);color:var(--bl);font-weight:700;padding:1px 6px;border-radius:4px;font-size:12px">Q'+qn+'</span>';
+    });
+    h+='<div style="font-size:13px;line-height:2;padding:10px;background:var(--bg);border-radius:var(--r);border-left:3px solid var(--bl);margin-bottom:8px">'+prevTxt+'</div>';
+    if(g.summaryAnswers&&g.summaryAnswers.length){
+      h+='<div style="font-size:12px;color:var(--mu)">Answers: '+
+        g.summaryAnswers.map(function(b){return'<span class="tag">Q'+b.qNum+': '+b.answer+'</span>';}).join('')+'</div>';
+    }
+  } else if(g.type==='flowchart'&&g.fcNodes){
+    h+='<div style="font-size:12px;color:var(--mu);margin-bottom:4px">'+g.fcNodes.length+' box(es), '+( g.fcArrows?g.fcArrows.length:0)+' arrow(s)</div>';
+    if(g.image) h+='<img src="'+g.image+'" style="max-width:100%;max-height:120px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:6px;cursor:zoom-in" onclick="openLB(this.src)">';
+    h+='<div style="font-size:12px;color:var(--mu)">Blanks: '+g.questions.map(function(q){return'<span class="tag">Q'+q.num+': '+q.answer+'</span>';}).join('')+'</div>';
+  } else if(g.image){
+    h+='<img src="'+g.image+'" style="max-width:100%;max-height:120px;border-radius:var(--r);border:1px solid var(--b);margin-bottom:8px;cursor:zoom-in" onclick="openLB(this.src)">';
+  } else if((g.type==='table'||g.type==='form')&&g.tableData){
+    h+=rendTblPrev(g.tableData);
+  }
+
+  if(g.wordBox&&g.wordBox.length) h+='<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Word box: '+g.wordBox.map(function(w){return'<span class="tag">'+w+'</span>';}).join('')+'</div>';
+  if(g.headingsList&&g.headingsList.length) h+='<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Headings: '+g.headingsList.length+' items</div>';
+  if(g.matchOptions&&g.matchOptions.length) h+='<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Options: '+g.matchOptions.map(function(m){return m.letter+'. '+m.text;}).join(', ')+'</div>';
+  if(g.minfoParaLabels&&g.minfoParaLabels.length) h+='<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Paragraphs: '+g.minfoParaLabels.join(', ')+'</div>';
+
+  if(!g.summaryText&&g.type!=='flowchart'){
+    h+='<div>';
+    g.questions.forEach(function(q,qi){
+      h+='<div class="q-item"><div class="q-item-h">'+
+        '<div class="q-item-num">'+q.num+'</div>'+
+        '<div style="flex:1;font-size:13px">'+renderBold(q.text||'')+(q.answer?'<span style="color:var(--gr);margin-left:8px;font-size:11px">✓ '+q.answer+'</span>':'')+'</div>'+
+        '<button class="btn btn-sm" style="margin-right:4px" onclick="openEditQ(\''+mod+'\','+sp+','+gi+','+qi+')">✏️</button>'+
+        '<button class="btn btn-sm btn-d" onclick="rmQ(\''+mod+'\','+sp+','+gi+','+qi+')">🗑</button>'+
+        '</div></div>';
+    });
+    h+='</div>';
+    if(g.type!=='table'&&g.type!=='form'&&g.type!=='diagram'){
+      h+='<button class="btn btn-p btn-sm" style="margin-top:8px" onclick="openQ(\''+mod+'\','+sp+','+gi+')">+ Add question</button>';
+    }
+  }
+
+  h+='</div></div>';
+  return h;
+};
+
+// Move question group to a different part/passage
+function moveQGToPart(mod, fromSp, gi, toSp){
+  if(!toSp||toSp===fromSp) return;
+  var tc=getTC();
+  var fromGroups, toGroups;
+  if(mod==='listening'){
+    if(!tc.listening.sections[toSp]) tc.listening.sections[toSp]={audio:null,groups:[],transcript:'',transcriptAccess:true};
+    fromGroups=tc.listening.sections[fromSp].groups;
+    toGroups=tc.listening.sections[toSp].groups;
+  } else {
+    if(!tc.reading.passages[toSp]) tc.reading.passages[toSp]={text:'',title:'',instruction:'',groups:[]};
+    fromGroups=tc.reading.passages[fromSp].groups;
+    toGroups=tc.reading.passages[toSp].groups;
+  }
+  var g=fromGroups.splice(gi,1)[0];
+  toGroups.push(g);
+  var partLabel=mod==='listening'?'Part':'Passage';
+  showToast('Group moved to '+partLabel+' '+toSp+'!');
+  renderMod(curTOwner==='admin'?'a':'t',mod);
+  // Switch to destination part
+  if(mod==='listening'){ curSec=toSp; swSec(toSp); }
+  else { curPas=toSp; swPas(toSp); }
+}
+
+// ── FIX 3: Edit individual question number ──
+// Override openEditQ to include Q number field
+var _prevOpenEditQ4 = openEditQ;
+openEditQ = function(mod, sp, gi, qi){
+  var tc=getTC();
+  var g=mod==='listening'?
+    tc.listening.sections[sp].groups[gi]:
+    tc.reading.passages[sp].groups[gi];
+
+  // Skip for table/form/diagram/flowchart/summary types
+  if(g.type==='table'||g.type==='form'||g.type==='diagram'||
+     g.type==='flowchart'||g.type==='summary1'||g.type==='summary2'){
+    _prevOpenEditQ4(mod,sp,gi,qi);
+    return;
+  }
+
+  editQCtx={mod:mod,sp:sp,gi:gi,qi:qi};
+  var q=g.questions[qi];
+  var tl=(QTYPES.find(function(t){return t.v===g.type;})||{l:g.type}).l;
+  document.getElementById('q-title').textContent='Edit Q'+q.num+' — '+tl;
+
+  function fld(id,lbl,inp){return'<div class="fr"><label class="fl">'+lbl+'</label>'+inp+'</div>';}
+
+  // Q number field always shown first
+  var h='<div style="background:var(--bll);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;display:flex;align-items:center;gap:10px">'+
+    '<label style="font-size:13px;font-weight:500;white-space:nowrap">Question number:</label>'+
+    '<input class="inp" type="number" id="eq-num" value="'+q.num+'" min="1" style="width:80px;font-size:16px;font-weight:700;text-align:center">'+
+    '<span style="font-size:12px;color:var(--mu)">Change to adjust the Q# for this question</span>'+
+  '</div>';
+
+  var ty=g.type;
+  if(ty==='tfng'){
+    h+=fld('qt','Statement','<textarea class="inp" id="qt" rows="2">'+( q.text||'')+'</textarea>');
+    h+='<div class="fr"><label class="fl">Correct answer</label>'+
+      '<select class="inp" id="qa">'+
+      ['True','False','Not Given'].map(function(v){return'<option value="'+v+'"'+(v===q.answer?' selected':'')+'>'+v+'</option>';}).join('')+
+      '</select></div>';
+  } else if(ty==='ynng'){
+    h+=fld('qt','Statement','<textarea class="inp" id="qt" rows="2">'+( q.text||'')+'</textarea>');
+    h+='<div class="fr"><label class="fl">Correct answer</label>'+
+      '<select class="inp" id="qa">'+
+      ['Yes','No','Not Given'].map(function(v){return'<option value="'+v+'"'+(v===q.answer?' selected':'')+'>'+v+'</option>';}).join('')+
+      '</select></div>';
+  } else if(ty==='mcq1'||ty==='mcq1r'){
+    h+=fld('qt','Question stem','<textarea class="inp" id="qt" rows="2">'+( q.text||'')+'</textarea>');
+    var ltrs=ty==='mcq1r'?'ABCD':'ABC';
+    ltrs.split('').forEach(function(l){
+      h+=fld('qo'+l,'Option '+l,'<input class="inp" id="qo'+l+'" value="'+( (q.options&&q.options[l])||'')+'" placeholder="Option '+l+'...">');
+    });
+    h+='<div class="fr"><label class="fl">Correct answer</label>'+
+      '<select class="inp" id="qa">'+ltrs.split('').map(function(l){return'<option value="'+l+'"'+(l===q.answer?' selected':'')+'>'+l+'</option>';}).join('')+'</select></div>';
+  } else if(ty==='mheading'){
+    h+=fld('qt','Paragraph label (e.g. Paragraph A)','<input class="inp" id="qt" value="'+( q.text||'')+'">');
+    h+='<div class="fr"><label class="fl">Correct heading number</label>'+
+      '<select class="inp" id="qa">'+
+      (g.headingsList||[]).map(function(hd){return'<option value="'+hd.num+'"'+(hd.num===q.answer?' selected':'')+'>'+hd.num+' — '+hd.text+'</option>';}).join('')+
+      '</select></div>';
+  } else if(ty==='matching'||ty==='mfeature'||ty==='sendend'){
+    h+=fld('qt','Statement','<textarea class="inp" id="qt" rows="2">'+( q.text||'')+'</textarea>');
+    h+='<div class="fr"><label class="fl">Correct match</label>'+
+      '<select class="inp" id="qa">'+
+      (g.matchOptions||[]).map(function(m){return'<option value="'+m.letter+'"'+(m.letter===q.answer?' selected':'')+'>'+m.letter+' — '+m.text+'</option>';}).join('')+
+      '</select></div>';
+  } else if(ty==='minfo'){
+    h+=fld('qt','Statement','<textarea class="inp" id="qt" rows="2">'+( q.text||'')+'</textarea>');
+    var labels=g.minfoParaLabels||[];
+    h+='<div class="fr"><label class="fl">Correct paragraph</label>'+
+      '<select class="inp" id="qa">'+
+      labels.map(function(l){return'<option value="'+l+'"'+(l===q.answer?' selected':'')+'>'+l+'</option>';}).join('')+
+      '</select></div>';
+  } else {
+    h+=fld('qt','Question / sentence','<textarea class="inp" id="qt" rows="2">'+( q.text||'')+'</textarea>');
+    h+=fld('qa','Correct answer','<input class="inp" id="qa" value="'+( q.answer||'')+'" placeholder="Correct answer...">');
+  }
+
+  document.getElementById('q-body').innerHTML=h;
+  document.querySelector('#mo-q .mf .btn-p').onclick=updateEditQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent='Update question';
+  openM('q');
+};
+
+// Save edited question including new Q number
+function updateEditQ(){
+  var tc=getTC();
+  var g=editQCtx.mod==='listening'?
+    tc.listening.sections[editQCtx.sp].groups[editQCtx.gi]:
+    tc.reading.passages[editQCtx.sp].groups[editQCtx.gi];
+  var q=g.questions[editQCtx.qi];
+
+  // Update Q number
+  var newNum=parseInt((document.getElementById('eq-num')||{}).value)||q.num;
+  q.num=newNum;
+
+  // Update content based on type
+  var ty=g.type;
+  var qt=(document.getElementById('qt')||{}).value||'';
+  var qa=(document.getElementById('qa')||{}).value||'';
+  q.text=qt;
+  q.answer=qa;
+
+  // Options for MCQ
+  if(ty==='mcq1'||ty==='mcq1r'){
+    q.options={};
+    'ABCD'.split('').forEach(function(l){
+      var el=document.getElementById('qo'+l);
+      if(el&&el.value) q.options[l]=el.value;
+    });
+  }
+
+  // Reset modal
+  document.querySelector('#mo-q .mf .btn-p').onclick=saveQ;
+  document.querySelector('#mo-q .mf .btn-p').textContent='Save question';
+  closeM('q');
+  showToast('Question updated!');
+  renderMod(curTOwner==='admin'?'a':'t',editQCtx.mod);
+}
+
+console.log('JIC IELTS — scroll fix, move group, edit Q number loaded ✓');
+</script>
