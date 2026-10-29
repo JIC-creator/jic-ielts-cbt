@@ -17497,3 +17497,230 @@ backToStudentHome = function(){
 
 console.log('JIC IELTS — practice mode button fix loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Rename test + Writing layout confirmation
+// ═══════════════════════════════════════════════
+
+// ── Rename test functionality ──
+function openRenameTest(testId, currentName){
+  var newName = prompt('Enter new test name:', currentName);
+  if(!newName||!newName.trim()) return;
+  newName = newName.trim();
+  db.collection('tests').doc(testId).update({name: newName}).then(function(){
+    showToast('✓ Test renamed to "'+newName+'"');
+    loadMyTests();
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+}
+
+// Override loadMyTests to add rename button
+loadMyTests = function(){
+  db.collection('tests').where('createdBy','==',CU.uid).where('owner','==','teacher').get().then(function(snap){
+    var h='';
+    if(snap.empty){
+      document.getElementById('my-tests').innerHTML='<div style="color:var(--mu);font-size:13px">No tests yet.</div>';
+      return;
+    }
+    snap.forEach(function(d){
+      var t=d.data();
+      var tid=d.id;
+      var isActive=t.status==='active';
+      var tname=(t.name||'Test').replace(/'/g,"\\'");
+      h+='<div class="tc" onclick="openEdit(\''+tid+'\',\'teacher\')">';
+      h+='<div class="ti" style="background:var(--bll)">📋</div>';
+      h+='<div style="flex:1;min-width:0">';
+      h+='<div style="font-size:14px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px">'+
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.name+'</span>'+
+        '<button class="btn btn-sm" style="flex-shrink:0;font-size:11px;padding:2px 7px" '+
+          'onclick="event.stopPropagation();openRenameTest(\''+tid+'\',\''+tname+'\')">✏️ Rename</button>'+
+        '</div>';
+      h+='<div style="font-size:12px;color:var(--mu)">'+t.type+' · '+t.status+'</div>';
+      h+='</div>';
+      h+='<span class="cm-tag" style="flex-shrink:0" onclick="event.stopPropagation();openClassroom(\''+tid+'\')">🏫 Classroom</span>';
+      h+='<button class="btn btn-sm btn-share" style="margin-left:6px;flex-shrink:0" onclick="event.stopPropagation();openShareModal(\''+tid+'\',\''+tname+'\')">🔗 Share</button>';
+      h+='<button class="btn btn-sm btn-assign" style="margin-left:6px;flex-shrink:0" onclick="event.stopPropagation();openAssignModal(\''+tid+'\',\''+tname+'\')">👥 Assign</button>';
+      h+='<button class="btn btn-sm" style="margin-left:6px;flex-shrink:0;background:'+(isActive?'var(--grl)':'var(--bg)')+';color:'+(isActive?'var(--gr)':'var(--mu)')+';border-color:'+(isActive?'var(--gr)':'var(--bm)')+'" onclick="toggleStatus(\''+tid+'\',\''+t.status+'\',event)">'+(isActive?'✓ Active':'○ Draft')+'</button>';
+      h+='<button class="btn btn-sm btn-d" style="margin-left:4px;flex-shrink:0" onclick="event.stopPropagation();delTest(\''+tid+'\')">🗑</button>';
+      h+='</div>';
+    });
+    document.getElementById('my-tests').innerHTML=h;
+  }).catch(function(e){ showToast('Error loading tests: '+e.message,'err'); });
+};
+
+// Also add rename to admin shared tests
+var _prevLoadShared2 = loadShared;
+loadShared = function(){
+  db.collection('tests').where('owner','==','admin').get().then(function(snap){
+    var h='';
+    snap.forEach(function(d){
+      var t=d.data();
+      var tid=d.id;
+      var tname=(t.name||'Test').replace(/'/g,"\\'");
+      h+='<div class="tc" onclick="openEdit(\''+tid+'\',\'admin\')">';
+      h+='<div class="ti" style="background:var(--grl)">🌐</div>';
+      h+='<div style="flex:1;min-width:0">';
+      h+='<div style="font-size:14px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px">'+
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.name+'</span>'+
+        '<button class="btn btn-sm" style="flex-shrink:0;font-size:11px;padding:2px 7px" '+
+          'onclick="event.stopPropagation();openRenameTest(\''+tid+'\',\''+tname+'\')">✏️ Rename</button>'+
+        '</div>';
+      h+='<div style="font-size:12px;color:var(--mu)">'+t.type+' · '+(t.visibility||'shared')+'</div>';
+      h+='</div>';
+      h+='<span class="cm-tag" style="flex-shrink:0" onclick="event.stopPropagation();openClassroom(\''+tid+'\')">🏫 Classroom</span>';
+      h+='<button class="btn btn-sm btn-assign" style="margin-left:6px;flex-shrink:0" onclick="event.stopPropagation();openAssignModal(\''+tid+'\',\''+tname+'\')">👥 Assign</button>';
+      h+='<button class="btn btn-sm btn-d" style="margin-left:4px;flex-shrink:0" onclick="event.stopPropagation();delTest(\''+tid+'\')">🗑</button>';
+      h+='</div>';
+    });
+    var el=document.getElementById('shared-tests');
+    if(el) el.innerHTML=h||'<div style="color:var(--mu);font-size:13px">No shared tests yet.</div>';
+  });
+};
+
+// ── Writing layout fix ──
+// Ensure writing test always shows side by side
+// Override renderWritingTest one final time using window.load
+window.addEventListener('load', function(){
+
+  // Final definitive writing test renderer
+  renderWritingTest = function(body){
+    var tc = testState.testContent;
+    var w = tc&&tc.writing;
+    var task = testState.curTask||1;
+    var taskData = task===1?(w&&w.task1):(w&&w.task2);
+    var minWords = taskData&&taskData.minWords||(task===1?150:250);
+    var savedAnswer = testState.answers['w'+task]||'';
+
+    body.style.cssText='overflow:hidden;display:flex;flex-direction:column;height:100%';
+    body.innerHTML='';
+
+    // Instruction bar
+    var instrBar=document.createElement('div');
+    instrBar.style.cssText='padding:8px 20px;background:var(--bll);border-bottom:1px solid var(--blm);font-size:13px;color:#0C447C;flex-shrink:0';
+    instrBar.innerHTML='<strong>Part '+task+'</strong> &nbsp;·&nbsp; You should spend about '+(task===1?'20':'40')+' minutes on this task. Write at least <strong>'+minWords+' words</strong>.';
+    body.appendChild(instrBar);
+
+    // Split container
+    var split=document.createElement('div');
+    split.id='wt-split-'+task;
+    split.style.cssText='display:flex;flex:1;min-height:0;overflow:hidden';
+
+    // LEFT — question/prompt
+    var left=document.createElement('div');
+    left.id='wt-left-'+task;
+    left.style.cssText='width:50%;flex-shrink:0;overflow-y:auto;padding:24px 28px;background:var(--s);border-right:1px solid var(--b);font-size:14px;line-height:1.8;box-sizing:border-box';
+    var leftHTML='<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--mu);margin-bottom:14px">Writing Task '+task+'</div>';
+    if(taskData&&taskData.prompt){
+      taskData.prompt.split('\n').forEach(function(line){
+        if(line.trim()) leftHTML+='<p style="margin-bottom:12px">'+renderBold(line)+'</p>';
+      });
+    } else {
+      leftHTML+='<p style="color:var(--mu)">No prompt set for this task.</p>';
+    }
+    if(task===1&&taskData&&taskData.image&&taskData.image!=='__large__'){
+      leftHTML+='<img src="'+taskData.image+'" style="max-width:100%;border-radius:var(--r);border:1px solid var(--b);margin-top:8px;cursor:zoom-in" onclick="openLB(this.src)" title="Click to enlarge">';
+    }
+    left.innerHTML=leftHTML;
+
+    // DIVIDER
+    var divider=document.createElement('div');
+    divider.style.cssText='width:6px;background:var(--b);cursor:col-resize;flex-shrink:0;position:relative;z-index:5;transition:background .15s;display:flex;align-items:center;justify-content:center';
+    divider.title='Drag to resize';
+    var handle=document.createElement('div');
+    handle.style.cssText='width:20px;height:28px;background:var(--bm);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--mu);pointer-events:none';
+    handle.innerHTML='↔';
+    divider.appendChild(handle);
+    divider.onmouseover=function(){ this.style.background='var(--bl)'; handle.style.background='var(--bl)'; handle.style.color='#fff'; };
+    divider.onmouseout=function(){ if(!this._dragging){ this.style.background='var(--b)'; handle.style.background='var(--bm)'; handle.style.color='var(--mu)'; }};
+
+    // RIGHT — answer
+    var right=document.createElement('div');
+    right.style.cssText='flex:1;display:flex;flex-direction:column;background:#fff;overflow:hidden';
+
+    var ansHdr=document.createElement('div');
+    ansHdr.style.cssText='padding:8px 16px;background:#f5f5f5;border-bottom:1px solid #ddd;font-size:12px;font-weight:600;color:#666;flex-shrink:0';
+    ansHdr.textContent='Part '+task+' Answer';
+    right.appendChild(ansHdr);
+
+    var ta=document.createElement('textarea');
+    ta.style.cssText='flex:1;border:none;outline:none;padding:20px 24px;font-size:14px;font-family:Georgia,serif;line-height:1.9;resize:none;background:#fff;color:#000;width:100%;box-sizing:border-box;min-height:0';
+    ta.placeholder='Enter your part '+task+' answer here...';
+    ta.value=savedAnswer;
+    ta.oninput=function(){
+      testState.answers['w'+task]=this.value;
+      var count=countWords2(this.value);
+      var wcEl=document.getElementById('wt-wc-'+task);
+      if(wcEl){
+        wcEl.textContent='Word Count: '+count+(count>=minWords?' ✓':'');
+        wcEl.style.color=count>=minWords?'var(--gr)':'var(--mu)';
+      }
+      autoSaveProgress();
+    };
+    right.appendChild(ta);
+
+    var ansFooter=document.createElement('div');
+    ansFooter.style.cssText='padding:8px 16px;background:#f5f5f5;border-top:1px solid #ddd;display:flex;align-items:center;justify-content:space-between;flex-shrink:0';
+    var imgSrc=task===1&&taskData&&taskData.image&&taskData.image!=='__large__'?taskData.image:null;
+    ansFooter.innerHTML=
+      (imgSrc?'<button onclick="openLB(\''+imgSrc+'\')" style="font-size:11px;padding:4px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;color:#666">🔍 Image to Text</button>':'<span></span>')+
+      '<span id="wt-wc-'+task+'" style="font-size:12px;color:'+(countWords2(savedAnswer)>=minWords?'var(--gr)':'var(--mu)')+'">Word Count: '+countWords2(savedAnswer)+(countWords2(savedAnswer)>=minWords?' ✓':'')+'</span>';
+    right.appendChild(ansFooter);
+
+    split.appendChild(left);
+    split.appendChild(divider);
+    split.appendChild(right);
+    body.appendChild(split);
+
+    // Bottom tabs
+    var tabs=document.createElement('div');
+    tabs.style.cssText='display:flex;border-top:1px solid var(--b);background:var(--s);flex-shrink:0';
+    [1,2].forEach(function(t){
+      var tab=document.createElement('button');
+      var hasContent=testState.answers['w'+t]&&testState.answers['w'+t].trim().length>0;
+      tab.style.cssText='flex:1;padding:12px;border:none;background:'+(t===task?'var(--bll)':'var(--s)')+';'+
+        'color:'+(t===task?'var(--bl)':'var(--mu)')+';font-size:13px;font-weight:'+(t===task?'700':'500')+';'+
+        'cursor:pointer;border-top:2px solid '+(t===task?'var(--bl)':'transparent')+';font-family:inherit';
+      tab.textContent='Part '+t+(hasContent?' ✓':'');
+      tab.onclick=function(){
+        var curTa=document.getElementById('wt-answer-'+task)||body.querySelector('textarea');
+        if(curTa) testState.answers['w'+task]=curTa.value;
+        testState.curTask=t;
+        renderTestModule();
+      };
+      tabs.appendChild(tab);
+    });
+    body.appendChild(tabs);
+
+    // Resizable divider
+    var dragging=false;
+    divider.onmousedown=function(e){
+      dragging=true;
+      divider._dragging=true;
+      divider.style.background='var(--bl)';
+      e.preventDefault();
+    };
+    document.addEventListener('mousemove',function(e){
+      if(!dragging) return;
+      var rect=split.getBoundingClientRect();
+      var pct=((e.clientX-rect.left)/rect.width*100);
+      pct=Math.max(25,Math.min(75,pct));
+      left.style.width=pct+'%';
+    });
+    document.addEventListener('mouseup',function(){
+      if(dragging){
+        dragging=false;
+        divider._dragging=false;
+        divider.style.background='var(--b)';
+        handle.style.background='var(--bm)';
+        handle.style.color='var(--mu)';
+      }
+    });
+
+    // Focus textarea
+    setTimeout(function(){ ta.focus(); },100);
+    document.getElementById('test-nav-bar').style.display='none';
+    document.getElementById('test-flag-btn').style.display='none';
+  };
+
+  console.log('JIC IELTS — rename test + writing layout final fix loaded ✓');
+});
+</script>
