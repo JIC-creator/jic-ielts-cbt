@@ -18009,3 +18009,79 @@ function updateEditQ(){
 
 console.log('JIC IELTS — scroll fix, move group, edit Q number loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Auto-scroll to top when switching parts
+//  Listening (student test + classroom)
+//  Transcript panel in classroom
+// ═══════════════════════════════════════════════
+
+// ── Student test: Listening part switch scroll ──
+var _prevRenderListeningTest = renderListeningTest;
+renderListeningTest = function(body){
+  _prevRenderListeningTest(body);
+  setTimeout(function(){
+    // Scroll questions panel to top
+    var qPanel = body.querySelector('.listening-qs-panel');
+    if(qPanel) qPanel.scrollTop = 0;
+    // Scroll full body to top
+    if(body) body.scrollTop = 0;
+  }, 50);
+};
+
+// Also scroll when switching parts via tab clicks
+var _prevSwListenPart = swListenPart;
+swListenPart = function(n){
+  _prevSwListenPart(n);
+  setTimeout(function(){
+    var body = document.getElementById('test-body');
+    if(!body) return;
+    var qPanel = body.querySelector('.listening-qs-panel');
+    if(qPanel) qPanel.scrollTop = 0;
+    body.scrollTop = 0;
+  }, 50);
+};
+
+// ── Classroom: Listening part switch scroll ──
+var _prevShowCMPart = showCMPart;
+showCMPart = function(n){
+  _prevShowCMPart(n);
+  setTimeout(function(){
+    // Scroll transcript panel to top
+    var transcript = document.getElementById('cm-transcript-panel');
+    if(transcript) transcript.scrollTop = 0;
+    // Scroll questions panel to top
+    var qPanel = document.getElementById('cm-listening-qs');
+    if(qPanel) qPanel.scrollTop = 0;
+  }, 50);
+};
+
+// ── Classroom: Reading passage switch scroll (transcript side) ──
+var _prevShowCMPassage3 = showCMPassage;
+showCMPassage = function(n){
+  _prevShowCMPassage3(n);
+  setTimeout(function(){
+    var pp = document.getElementById('cm-passage-panel');
+    var qp = document.getElementById('cm-reading-qs');
+    if(pp) pp.scrollTop = 0;
+    if(qp) qp.scrollTop = 0;
+  }, 50);
+};
+
+// ── Also scroll renderTestModule for listening ──
+var _prevRenderTestModule2 = renderTestModule;
+renderTestModule = function(){
+  _prevRenderTestModule2();
+  if(testState.module==='listening'){
+    setTimeout(function(){
+      var body = document.getElementById('test-body');
+      if(!body) return;
+      body.scrollTop = 0;
+      var panels = body.querySelectorAll('[style*="overflow-y"]');
+      panels.forEach(function(p){ p.scrollTop = 0; });
+    }, 50);
+  }
+};
+
+console.log('JIC IELTS — listening + transcript auto-scroll loaded ✓');
+</script>
