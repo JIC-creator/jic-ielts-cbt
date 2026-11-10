@@ -18798,3 +18798,225 @@ window.addEventListener('load',function(){
 console.log('JIC IELTS — Admin People tab loaded ✓');
 })();
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Restore admin "Shared tests" list
+//  The earlier rename patch wrote to a container that
+//  doesn't exist (#shared-tests) and dropped the
+//  Shared/Draft toggle. Teachers only see admin tests
+//  whose visibility is "shared", so without the toggle
+//  their Shared tests page stayed empty.
+// ═══════════════════════════════════════════════
+loadShared = function(){
+  db.collection('tests').where('owner','==','admin').get().then(function(snap){
+    var h='';
+    snap.forEach(function(d){
+      var t=d.data(), tid=d.id;
+      var isShared=t.visibility==='shared';
+      var tname=(t.name||'Test').replace(/'/g,"\\'");
+      h+='<div class="tc" onclick="openEdit(\''+tid+'\',\'admin\')">'+
+        '<div class="ti" style="background:var(--bll)">📋</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:14px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px">'+
+            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.name+'</span>'+
+            '<button class="btn btn-sm" style="flex-shrink:0;font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openRenameTest(\''+tid+'\',\''+tname+'\')">✏️ Rename</button>'+
+          '</div>'+
+          '<div style="font-size:12px;color:var(--mu)">'+t.type+' · '+(t.visibility||'draft')+'</div>'+
+        '</div>'+
+        '<span class="cm-tag" style="flex-shrink:0" onclick="event.stopPropagation();openClassroom(\''+tid+'\')">🏫 Classroom</span>'+
+        '<button class="btn btn-sm" style="margin-left:6px;flex-shrink:0;background:'+(isShared?'var(--grl)':'var(--bg)')+';color:'+(isShared?'var(--gr)':'var(--mu)')+';border-color:'+(isShared?'var(--gr)':'var(--bm)')+'" onclick="toggleVisibility(\''+tid+'\',\''+(t.visibility||'draft')+'\',event)">'+(isShared?'✓ Shared':'○ Draft')+'</button>'+
+        '<button class="btn btn-sm btn-d" style="margin-left:4px;flex-shrink:0" onclick="event.stopPropagation();delTest(\''+tid+'\')">🗑</button>'+
+      '</div>';
+    });
+    var el=document.getElementById('shared-list');
+    if(el) el.innerHTML=h||'<div style="color:var(--mu);font-size:13px">No shared tests yet.</div>';
+  }).catch(function(e){ showToast('Error loading shared tests: '+e.message,'err'); });
+};
+console.log('JIC IELTS — admin shared tests list restored ✓');
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  TEACHER RESULTS — student list first,
+//  click a student to see their results
+// ═══════════════════════════════════════════════
+(function(){
+
+var resView = {studentId:null, q:''};
+
+var css = document.createElement('style');
+css.textContent = [
+'.rs-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--b);cursor:pointer;transition:background .12s}',
+'.rs-row:last-child{border-bottom:none}',
+'.rs-row:hover{background:var(--bll)}',
+'.rs-av{width:40px;height:40px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}',
+'.rs-empty{padding:32px;text-align:center;color:var(--mu);font-size:13px}'
+].join('\n');
+document.head.appendChild(css);
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function initials(n){ return (n||'?').split(' ').filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().substring(0,2)||'?'; }
+function ts(r){ try{ return r.submittedAt&&r.submittedAt.toDate?r.submittedAt.toDate().getTime():0; }catch(e){ return 0; } }
+function val(id){ var e=document.getElementById(id); return e?e.value:''; }
+
+// Keep only the latest submission per student + test + module
+function dedupe(list){
+  var sorted=list.slice().sort(function(a,b){return ts(b)-ts(a);}), seen={}, out=[];
+  sorted.forEach(function(r){
+    var k=(r.studentId||'')+'_'+(r.testId||'')+'_'+(r.module||'');
+    if(!seen[k]){ seen[k]=1; out.push(r); }
+  });
+  return out;
+}
+
+function ensureShell(){
+  var ap=document.getElementById('ta-results'); if(!ap) return false;
+  if(document.getElementById('res-shell')) return true;
+  ap.innerHTML=
+   '<div id="res-shell">'+
+     '<div id="res-list-view">'+
+       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:10px;flex-wrap:wrap">'+
+         '<div style="font-size:18px;font-weight:600">Student Results</div>'+
+         '<button class="btn btn-sm btn-p" onclick="loadTeacherResults()">🔄 Refresh</button>'+
+       '</div>'+
+       '<input class="inp" id="res-student-search" placeholder="Search students..." oninput="resSearch(this.value)" style="margin-bottom:12px">'+
+       '<div class="card" style="padding:0;overflow:hidden"><div id="res-student-list"></div></div>'+
+     '</div>'+
+     '<div id="res-detail-view" style="display:none">'+
+       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">'+
+         '<button class="btn btn-sm" onclick="resBack()">← All students</button>'+
+         '<div id="res-detail-head" style="display:flex;align-items:center;gap:10px"></div>'+
+         '<button class="btn btn-sm" style="margin-left:auto" onclick="loadTeacherResults()">🔄 Refresh</button>'+
+       '</div>'+
+       '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">'+
+         '<select class="inp" id="res-filter-test" style="width:auto" onchange="filterResults()"><option value="">All tests</option></select>'+
+         '<select class="inp" id="res-filter-mod" style="width:auto" onchange="filterResults()">'+
+           '<option value="">All modules</option><option value="listening">🎧 Listening</option>'+
+           '<option value="reading">📖 Reading</option><option value="writing">✏️ Writing</option></select>'+
+         '<select class="inp" id="res-filter-status" style="width:auto" onchange="filterResults()">'+
+           '<option value="">All statuses</option><option value="pending">⏳ Pending release</option>'+
+           '<option value="released">✓ Released</option></select>'+
+       '</div>'+
+       '<div id="t-results-list"></div>'+
+     '</div>'+
+   '</div>';
+  return true;
+}
+
+function showView(){
+  var detail=!!resView.studentId;
+  var l=document.getElementById('res-list-view'), d=document.getElementById('res-detail-view');
+  if(l) l.style.display=detail?'none':'block';
+  if(d) d.style.display=detail?'block':'none';
+}
+
+// ── Student list ──
+function renderStudentList(){
+  var el=document.getElementById('res-student-list'); if(!el) return;
+  var all=window._allResults||[];
+  if(!all.length){
+    el.innerHTML='<div class="rs-empty"><div style="font-size:36px;margin-bottom:8px">📊</div>No results yet. They appear here after students submit tests.</div>';
+    return;
+  }
+  var by={};
+  dedupe(all).forEach(function(r){
+    var id=r.studentId||'unknown';
+    var g=by[id]||(by[id]={id:id,name:r.studentName||'(unknown)',tests:{},mods:0,pending:0,last:0});
+    g.tests[r.testId]=1; g.mods++; if(!r.released) g.pending++; g.last=Math.max(g.last,ts(r));
+  });
+  var q=resView.q;
+  var list=Object.keys(by).map(function(k){return by[k];})
+    .filter(function(g){ return !q||g.name.toLowerCase().indexOf(q)>-1; })
+    .sort(function(a,b){ return (b.pending>0)-(a.pending>0) || b.last-a.last; });
+  if(!list.length){ el.innerHTML='<div class="rs-empty">No matching students.</div>'; return; }
+  el.innerHTML=list.map(function(g){
+    var nTests=Object.keys(g.tests).length;
+    var last=g.last?new Date(g.last).toLocaleDateString():'—';
+    return '<div class="rs-row" onclick="resOpenStudent(\''+g.id+'\')">'+
+      '<div class="rs-av">'+esc(initials(g.name))+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:14px;font-weight:600">'+esc(g.name)+'</div>'+
+        '<div style="font-size:12px;color:var(--mu)">'+nTests+' test'+(nTests===1?'':'s')+' · '+g.mods+' module'+(g.mods===1?'':'s')+' · last submitted '+last+'</div>'+
+      '</div>'+
+      (g.pending?'<span class="badge b-am">⏳ '+g.pending+' to release</span>':'<span class="badge b-gr">✓ All released</span>')+
+      '<span style="color:var(--mu);font-size:18px">›</span>'+
+    '</div>';
+  }).join('');
+}
+
+window.resSearch=function(q){ resView.q=(q||'').toLowerCase(); renderStudentList(); };
+
+// ── Student detail ──
+window.resOpenStudent=function(id){
+  resView.studentId=id;
+  var mine=(window._allResults||[]).filter(function(r){return r.studentId===id;});
+  var name=(mine[0]&&mine[0].studentName)||'Student';
+  var head=document.getElementById('res-detail-head');
+  if(head) head.innerHTML='<div class="rs-av">'+esc(initials(name))+'</div>'+
+    '<div><div style="font-size:16px;font-weight:700">'+esc(name)+'</div>'+
+    '<div style="font-size:12px;color:var(--mu)">Results</div></div>';
+  // Fill filters with this student's tests
+  var tf=document.getElementById('res-filter-test');
+  if(tf){
+    while(tf.options.length>1) tf.remove(1);
+    var seen={};
+    mine.forEach(function(r){ if(r.testId&&!seen[r.testId]){ seen[r.testId]=1; var o=document.createElement('option'); o.value=r.testId; o.textContent=r.testName||'Test'; tf.appendChild(o); } });
+    tf.value='';
+  }
+  var mf=document.getElementById('res-filter-mod'); if(mf) mf.value='';
+  var sf=document.getElementById('res-filter-status'); if(sf) sf.value='';
+  showView(); filterResults();
+  window.scrollTo(0,0);
+};
+window.resBack=function(){
+  resView.studentId=null; showView(); renderStudentList();
+};
+
+// Existing release / practice buttons call filterResults(), so it now respects the open student
+filterResults=function(){
+  if(!document.getElementById('res-shell')) return;
+  if(!resView.studentId){ renderStudentList(); return; }
+  var tF=val('res-filter-test'), mF=val('res-filter-mod'), sF=val('res-filter-status');
+  var rows=(window._allResults||[]).filter(function(r){
+    if(r.studentId!==resView.studentId) return false;
+    if(tF&&r.testId!==tF) return false;
+    if(mF&&r.module!==mF) return false;
+    if(sF==='released'&&!r.released) return false;
+    if(sF==='pending'&&r.released) return false;
+    return true;
+  });
+  rendTeacherResults(rows);
+};
+
+// Load all of this teacher's results, then show whichever view is open
+loadTeacherResults=function(){
+  if(!ensureShell()) return;
+  showView();
+  var first=!(window._allResults&&window._allResults.length);
+  if(first){
+    var target=document.getElementById(resView.studentId?'t-results-list':'res-student-list');
+    if(target) target.innerHTML='<div class="rs-empty"><div style="font-size:32px;margin-bottom:8px">⏳</div>Loading results...</div>';
+  }
+  db.collection('results').where('teacherId','==',CU.uid).get().then(function(snap){
+    window._allResults=[];
+    snap.forEach(function(d){ window._allResults.push(Object.assign({id:d.id},d.data())); });
+    window._allResults.sort(function(a,b){return ts(b)-ts(a);});
+    if(resView.studentId && !window._allResults.some(function(r){return r.studentId===resView.studentId;})){
+      resView.studentId=null; showView();
+    }
+    filterResults();
+  }).catch(function(e){
+    var t=document.getElementById(resView.studentId?'t-results-list':'res-student-list');
+    if(t) t.innerHTML='<div class="rs-empty" style="color:var(--rd)">Error loading results: '+esc(e.message)+'</div>';
+  });
+};
+
+// Clicking "Results" in the sidebar always starts at the student list
+var _tNres=tN;
+tN=function(page,el){
+  if(page==='results') resView.studentId=null;
+  _tNres(page,el);
+};
+
+console.log('JIC IELTS — teacher results: student list view loaded ✓');
+})();
+</script>
