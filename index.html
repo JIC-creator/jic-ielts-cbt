@@ -18363,3 +18363,438 @@ rendStudentTests = function(tests){
 
 console.log('JIC IELTS — optional due date loaded ✓');
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  ADMIN PORTAL — PEOPLE (Path A)
+//  Admin-only account creation via a secondary
+//  Firebase connection (keeps admin signed in).
+//  Single + bulk (CSV/Excel), archive/reactivate,
+//  reset-password email. Self-signup hidden.
+//  NOTE: switch createAccount() to a Cloud Function
+//  before going live with real student data.
+// ═══════════════════════════════════════════════
+(function(){
+
+var css = document.createElement('style');
+css.textContent = [
+'.pp-tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}',
+'.pp-tab{padding:8px 16px;border:1px solid var(--b);border-radius:20px;background:var(--s);font-size:13px;font-weight:500;color:var(--mu);cursor:pointer;font-family:inherit}',
+'.pp-tab.active{background:var(--bll);color:var(--bl);border-color:var(--bl);font-weight:700}',
+'.pp-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--b)}',
+'.pp-row:last-child{border-bottom:none}',
+'.pp-av{width:38px;height:38px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}',
+'.pp-row.archived .pp-av{background:var(--bg);color:var(--mu)}',
+'.pp-empty{padding:28px;text-align:center;color:var(--mu);font-size:13px}',
+'.pp-note{font-size:12px;color:var(--mu);background:var(--bg);border:1px solid var(--b);border-radius:var(--r);padding:8px 12px;margin-bottom:12px;line-height:1.6}',
+'.pp-cred{font-family:monospace;font-size:14px;background:var(--bg);border:1px solid var(--b);border-radius:var(--r);padding:10px 12px;margin:6px 0;word-break:break-all}',
+'.pp-tbl{width:100%;border-collapse:collapse;font-size:12px}',
+'.pp-tbl th{text-align:left;padding:6px 8px;background:var(--bg);color:var(--mu);font-weight:500;border-bottom:1px solid var(--b)}',
+'.pp-tbl td{padding:6px 8px;border-bottom:1px solid var(--b);vertical-align:top}'
+].join('\n');
+document.head.appendChild(css);
+
+// ── helpers ──
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function val(id){ var e=document.getElementById(id); return e?e.value:''; }
+function initials(n){ return (n||'?').split(' ').filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().substring(0,2)||'?'; }
+function genPassword(){
+  var chars='ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', out='';
+  var arr=new Uint32Array(10); (window.crypto||window.msCrypto).getRandomValues(arr);
+  for(var i=0;i<10;i++) out+=chars[arr[i]%chars.length];
+  return out;
+}
+function friendlyErr(e){
+  var c=(e&&e.code)||'';
+  if(c==='auth/email-already-in-use') return 'Email is already registered';
+  if(c==='auth/invalid-email') return 'Invalid email address';
+  if(c==='auth/weak-password') return 'Password too weak (min. 6 characters)';
+  if(c==='auth/network-request-failed') return 'Network error — try again';
+  return (e&&e.message)||'Unknown error';
+}
+function download(filename, text){
+  var blob=new Blob([text],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+function csvCell(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function parseCSV(text){
+  var rows=[],row=[],cur='',q=false;
+  for(var i=0;i<text.length;i++){
+    var ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; }
+      else cur+=ch;
+    } else {
+      if(ch==='"') q=true;
+      else if(ch===','){ row.push(cur); cur=''; }
+      else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&text[i+1]==='\n') i++; row.push(cur); cur=''; rows.push(row); row=[]; }
+      else cur+=ch;
+    }
+  }
+  if(cur!==''||row.length){ row.push(cur); rows.push(row); }
+  return rows.filter(function(r){ return r.some(function(c){return String(c).trim()!=='';}); });
+}
+
+// ── Secondary Firebase connection: creates accounts without signing the admin out ──
+function getSecAuth(){
+  var app=firebase.apps.filter(function(a){return a.name==='JICSecondary';})[0]||firebase.initializeApp(FC,'JICSecondary');
+  return app.auth();
+}
+function createAccount(name,email,pw,role){
+  var sa=getSecAuth();
+  return sa.createUserWithEmailAndPassword(email,pw).then(function(c){
+    var uid=c.user.uid;
+    return db.collection('users').doc(uid).set({
+      name:name, email:email, role:role, status:'active',
+      createdBy:CU.uid, createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    }).then(function(){ return sa.signOut(); }).then(function(){ return uid; })
+    .catch(function(err){ return sa.signOut().then(function(){ throw err; }); });
+  });
+}
+
+// ── Sidebar + page ──
+var navItems=document.querySelectorAll('#s-admin .ni'), tNav=null;
+navItems.forEach(function(n){
+  var oc=n.getAttribute('onclick')||'';
+  if(oc.indexOf("aN('teachers'")===0){ tNav=n; n.style.display='none'; }
+  if(oc.indexOf("aN('students'")===0){ n.style.display='none'; }
+});
+var pNav=document.createElement('div');
+pNav.className='ni'; pNav.setAttribute('onclick',"aN('people',this)"); pNav.textContent='👥 People';
+if(tNav) tNav.parentNode.insertBefore(pNav,tNav);
+
+var page=document.createElement('div');
+page.className='ap mcn'; page.id='aa-people';
+page.innerHTML=
+ '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+
+   '<div style="font-size:18px;font-weight:600">People</div>'+
+   '<div style="display:flex;gap:8px">'+
+     '<button class="btn" onclick="peopleBulkOpen()">📎 Bulk upload</button>'+
+     '<button class="btn btn-p" onclick="peopleRegOpen()">+ Register person</button>'+
+   '</div>'+
+ '</div>'+
+ '<div class="pp-tabs">'+
+   '<button class="pp-tab active" id="pp-tab-student" onclick="peopleSetRole(\'student\')">Students</button>'+
+   '<button class="pp-tab" id="pp-tab-teacher" onclick="peopleSetRole(\'teacher\')">Teachers</button>'+
+ '</div>'+
+ '<div class="card" style="padding:0;overflow:hidden">'+
+   '<div style="padding:12px 14px;border-bottom:1px solid var(--b);display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+     '<input class="inp" id="pp-search" placeholder="Search name or email..." oninput="peopleSetQuery(this.value)" style="flex:1;min-width:180px">'+
+     '<div class="pp-tabs" style="margin:0">'+
+       '<button class="pp-tab active" id="pp-st-active" onclick="peopleSetStatus(\'active\')">Active</button>'+
+       '<button class="pp-tab" id="pp-st-archived" onclick="peopleSetStatus(\'archived\')">Archived</button>'+
+     '</div>'+
+   '</div>'+
+   '<div id="pp-list"><div class="pp-empty">Open this page to load people.</div></div>'+
+ '</div>';
+document.getElementById('admin-main').appendChild(page);
+
+// Load when the People page opens
+var _aN=aN;
+aN=function(pg,el){ _aN(pg,el); if(pg==='people') loadPeople(); };
+
+// ── State + list ──
+var S={role:'student',status:'active',q:'',users:[]};
+
+window.loadPeople=function(){
+  var el=document.getElementById('pp-list');
+  if(el) el.innerHTML='<div class="pp-empty">⏳ Loading...</div>';
+  db.collection('users').get().then(function(snap){
+    S.users=[]; snap.forEach(function(d){ var u=d.data(); u.id=d.id; S.users.push(u); });
+    render();
+  }).catch(function(e){
+    if(el) el.innerHTML='<div class="pp-empty" style="color:var(--rd)">Error: '+esc(e.message)+'</div>';
+  });
+};
+window.peopleSetRole=function(r){ S.role=r; render(); };
+window.peopleSetStatus=function(s){ S.status=s; render(); };
+window.peopleSetQuery=function(q){ S.q=(q||'').toLowerCase(); render(); };
+
+function isArchived(u){ return u.status==='archived'; }
+
+function render(){
+  var inRole=S.users.filter(function(u){return u.role===S.role;});
+  var nAct=inRole.filter(function(u){return !isArchived(u);}).length;
+  var nArc=inRole.length-nAct;
+  var cS=S.users.filter(function(u){return u.role==='student'&&!isArchived(u);}).length;
+  var cT=S.users.filter(function(u){return u.role==='teacher'&&!isArchived(u);}).length;
+  var set=function(id,t,on){ var e=document.getElementById(id); if(e){ e.textContent=t; if(on!==undefined) e.classList.toggle('active',on); } };
+  set('pp-tab-student','Students ('+cS+')',S.role==='student');
+  set('pp-tab-teacher','Teachers ('+cT+')',S.role==='teacher');
+  set('pp-st-active','Active ('+nAct+')',S.status==='active');
+  set('pp-st-archived','Archived ('+nArc+')',S.status==='archived');
+
+  var list=inRole.filter(function(u){ return (S.status==='archived')===isArchived(u); })
+    .filter(function(u){ return !S.q || (u.name||'').toLowerCase().indexOf(S.q)>-1 || (u.email||'').toLowerCase().indexOf(S.q)>-1; })
+    .sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+
+  var el=document.getElementById('pp-list'); if(!el) return;
+  if(!list.length){
+    el.innerHTML='<div class="pp-empty">'+(S.q?'No matches.':(S.status==='archived'?'Nobody archived.':'No '+S.role+'s yet. Use “Register person” or “Bulk upload”.'))+'</div>';
+    return;
+  }
+  el.innerHTML=list.map(function(u){
+    var arc=isArchived(u);
+    return '<div class="pp-row'+(arc?' archived':'')+'">'+
+      '<div class="pp-av">'+esc(initials(u.name))+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(u.name||'(no name)')+'</div>'+
+        '<div style="font-size:12px;color:var(--mu);overflow:hidden;text-overflow:ellipsis">'+esc(u.email||'')+'</div>'+
+      '</div>'+
+      (arc?'<span class="badge b-gy">Archived</span>':'')+
+      '<button class="btn btn-sm" data-email="'+esc(u.email)+'" onclick="peopleResetPw(this.dataset.email)" title="Send password reset email">🔑 Reset password</button>'+
+      (arc?
+        '<button class="btn btn-sm" onclick="peopleArchive(\''+u.id+'\',false)">♻️ Reactivate</button>':
+        '<button class="btn btn-sm btn-d" onclick="peopleArchive(\''+u.id+'\',true)">📦 Archive</button>')+
+    '</div>';
+  }).join('');
+}
+
+window.peopleArchive=function(id,archive){
+  var u=S.users.filter(function(x){return x.id===id;})[0]; if(!u) return;
+  if(archive && !confirm('Archive '+(u.name||u.email)+'?\n\nThey will no longer be able to sign in. Their data is kept, and you can reactivate them anytime.')) return;
+  var data=archive?{status:'archived',archivedAt:firebase.firestore.FieldValue.serverTimestamp()}:{status:'active',archivedAt:null};
+  db.collection('users').doc(id).update(data).then(function(){
+    u.status=archive?'archived':'active'; render();
+    showToast(archive?'Archived '+(u.name||u.email):'Reactivated '+(u.name||u.email));
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+};
+window.peopleResetPw=function(email){
+  if(!email){ showToast('No email on this account.','err'); return; }
+  if(!confirm('Send a password reset email to '+email+'?')) return;
+  auth.sendPasswordResetEmail(email).then(function(){ showToast('✓ Reset email sent to '+email); })
+    .catch(function(e){ showToast('Error: '+friendlyErr(e),'err'); });
+};
+
+// ── Register one person ──
+function closeModal(id){ var m=document.getElementById(id); if(m) m.parentNode.removeChild(m); }
+window.peopleCloseReg=function(){ closeModal('mo-pp-reg'); };
+
+window.peopleRegOpen=function(){
+  closeModal('mo-pp-reg');
+  var m=document.createElement('div'); m.className='mo open'; m.id='mo-pp-reg';
+  m.onclick=function(e){ if(e.target===m) peopleCloseReg(); };
+  m.innerHTML=
+   '<div class="mb" style="max-width:480px">'+
+     '<div class="mh"><div class="mt">Register person</div><button class="btn btn-sm" onclick="peopleCloseReg()">✕</button></div>'+
+     '<div class="mbd" id="ppr-body">'+
+       '<div class="fr"><label class="fl">Role</label><select class="inp" id="ppr-role">'+
+         '<option value="student"'+(S.role==='student'?' selected':'')+'>Student</option>'+
+         '<option value="teacher"'+(S.role==='teacher'?' selected':'')+'>Teacher</option></select></div>'+
+       '<div class="fr"><label class="fl">Full name</label><input class="inp" id="ppr-name" placeholder="e.g. Maria Santos"></div>'+
+       '<div class="fr"><label class="fl">Email</label><input class="inp" type="email" id="ppr-email" placeholder="name@example.com"></div>'+
+       '<div class="fr"><label class="fl">Temporary password</label>'+
+         '<div style="display:flex;gap:8px"><input class="inp" id="ppr-pw" value="'+genPassword()+'" style="font-family:monospace">'+
+         '<button class="btn btn-sm" onclick="document.getElementById(\'ppr-pw\').value=peopleGenPw()">🎲 New</button></div>'+
+         '<div style="font-size:11px;color:var(--mu);margin-top:4px">Share this with the person. They can change it later using “Forgot password?”.</div></div>'+
+     '</div>'+
+     '<div class="mf"><button class="btn" onclick="peopleCloseReg()">Cancel</button>'+
+       '<button class="btn btn-p" id="ppr-btn" onclick="peopleRegister()">Create account</button></div>'+
+   '</div>';
+  document.body.appendChild(m);
+};
+window.peopleGenPw=genPassword;
+
+window.peopleRegister=function(){
+  var role=val('ppr-role'), name=val('ppr-name').trim(), email=val('ppr-email').trim(), pw=val('ppr-pw');
+  if(!name){ showToast('Please enter a name.','err'); return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showToast('Please enter a valid email.','err'); return; }
+  if(pw.length<6){ showToast('Password must be at least 6 characters.','err'); return; }
+  var btn=document.getElementById('ppr-btn'); if(btn){ btn.disabled=true; btn.textContent='Creating...'; }
+  createAccount(name,email,pw,role).then(function(){
+    var share='JIC IELTS Platform login\nSign in at: '+location.href.split('#')[0]+'\nEmail: '+email+'\nTemporary password: '+pw;
+    window._ppShare=share;
+    document.getElementById('ppr-body').innerHTML=
+      '<div style="text-align:center;font-size:32px;margin-bottom:4px">✅</div>'+
+      '<div style="text-align:center;font-weight:600;margin-bottom:12px">Account created for '+esc(name)+'</div>'+
+      '<div style="font-size:12px;color:var(--mu)">Email</div><div class="pp-cred">'+esc(email)+'</div>'+
+      '<div style="font-size:12px;color:var(--mu)">Temporary password</div><div class="pp-cred">'+esc(pw)+'</div>'+
+      '<div class="pp-note">This password is not stored anywhere. Copy it now and send it to the person securely.</div>';
+    var mf=document.querySelector('#mo-pp-reg .mf');
+    mf.innerHTML='<button class="btn" onclick="peopleRegOpen()">Register another</button>'+
+      '<button class="btn btn-p" onclick="navigator.clipboard.writeText(window._ppShare).then(function(){showToast(\'Copied!\')})">📋 Copy login details</button>'+
+      '<button class="btn" onclick="peopleCloseReg()">Done</button>';
+    loadPeople();
+  }).catch(function(e){
+    if(btn){ btn.disabled=false; btn.textContent='Create account'; }
+    showToast(friendlyErr(e),'err');
+  });
+};
+
+// ── Bulk upload ──
+var B={rows:[],created:[],running:false};
+window.peopleBulkOpen=function(){
+  closeModal('mo-pp-bulk');
+  B={rows:[],created:[],running:false};
+  var m=document.createElement('div'); m.className='mo open'; m.id='mo-pp-bulk';
+  m.onclick=function(e){ if(e.target===m && !B.running) closeModal('mo-pp-bulk'); };
+  m.innerHTML=
+   '<div class="mb" style="max-width:760px;max-height:90vh;display:flex;flex-direction:column">'+
+     '<div class="mh"><div class="mt">Bulk register</div><button class="btn btn-sm" onclick="if(!window._ppBusy)document.getElementById(\'mo-pp-bulk\').remove()">✕</button></div>'+
+     '<div class="mbd" style="overflow-y:auto;flex:1" id="ppb-body"></div>'+
+     '<div class="mf" id="ppb-foot"></div>'+
+   '</div>';
+  document.body.appendChild(m);
+  bulkRender();
+};
+
+window.peopleBulkTemplate=function(){
+  download('jic-people-template.csv','Name,Email,Role,Password\nMaria Santos,maria@example.com,student,\nJuan Dela Cruz,juan@example.com,teacher,\n');
+};
+
+window.peopleBulkFile=function(inp){
+  if(!inp.files||!inp.files[0]) return;
+  var f=inp.files[0], name=f.name.toLowerCase(), reader=new FileReader();
+  if(/\.xlsx?$/.test(name)){
+    loadXLSX(function(){
+      reader.onload=function(e){
+        try{
+          var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+          var rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+          bulkParse(rows.filter(function(r){return r.some(function(c){return String(c).trim()!=='';});}));
+        }catch(err){ showToast('Could not read Excel file: '+err.message,'err'); }
+      };
+      reader.readAsArrayBuffer(f);
+    });
+  } else {
+    reader.onload=function(e){ bulkParse(parseCSV(String(e.target.result).replace(/^\uFEFF/,''))); };
+    reader.readAsText(f);
+  }
+  inp.value='';
+};
+function loadXLSX(cb){
+  if(window.XLSX) return cb();
+  var s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=cb; s.onerror=function(){ showToast('Could not load the Excel reader. Please use a CSV file instead.','err'); };
+  document.head.appendChild(s);
+}
+
+function bulkParse(raw){
+  if(!raw.length){ showToast('The file is empty.','err'); return; }
+  var head=raw[0].map(function(c){return String(c).trim().toLowerCase();});
+  var hasHead=head.indexOf('email')>-1;
+  var idx={name:0,email:1,role:2,password:3};
+  if(hasHead){ ['name','email','role','password'].forEach(function(k){ idx[k]=head.indexOf(k); }); }
+  var body=hasHead?raw.slice(1):raw;
+  var defRole=val('ppb-defrole')||'student';
+  var seen={}, existing={};
+  S.users.forEach(function(u){ if(u.email) existing[u.email.toLowerCase()]=true; });
+  B.rows=body.map(function(r,i){
+    var g=function(k){ return idx[k]>-1&&r[idx[k]]!==undefined?String(r[idx[k]]).trim():''; };
+    var row={n:i+1,name:g('name'),email:g('email'),role:(g('role')||defRole).toLowerCase(),password:g('password'),status:'ready',msg:''};
+    var em=row.email.toLowerCase();
+    if(!row.name) { row.status='error'; row.msg='Missing name'; }
+    else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)){ row.status='error'; row.msg='Invalid email'; }
+    else if(row.role!=='student'&&row.role!=='teacher'){ row.status='error'; row.msg='Role must be student or teacher'; }
+    else if(existing[em]){ row.status='error'; row.msg='Already registered'; }
+    else if(seen[em]){ row.status='error'; row.msg='Duplicate in file'; }
+    else if(row.password&&row.password.length<6){ row.status='error'; row.msg='Password under 6 characters'; }
+    seen[em]=true;
+    if(row.status==='ready'&&!row.password){ row.password=genPassword(); row.generated=true; }
+    return row;
+  });
+  bulkRender();
+}
+
+function bulkRender(){
+  var body=document.getElementById('ppb-body'), foot=document.getElementById('ppb-foot');
+  if(!body||!foot) return;
+  if(!B.rows.length){
+    body.innerHTML=
+      '<div class="pp-note">Upload a <strong>.csv</strong> or <strong>.xlsx</strong> file with the columns <strong>Name, Email, Role, Password</strong>. '+
+      'Role is “student” or “teacher”. Leave Password blank and a temporary one is generated for each person.</div>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+        '<label style="font-size:13px">If Role is blank, use:</label>'+
+        '<select class="inp" id="ppb-defrole" style="width:auto"><option value="student">Student</option><option value="teacher">Teacher</option></select>'+
+        '<button class="btn btn-sm" onclick="peopleBulkTemplate()">⬇️ Download template</button>'+
+      '</div>'+
+      '<button class="btn btn-p" onclick="document.getElementById(\'ppb-file\').click()">📎 Choose file</button>'+
+      '<input type="file" id="ppb-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="peopleBulkFile(this)">';
+    foot.innerHTML='<button class="btn" onclick="document.getElementById(\'mo-pp-bulk\').remove()">Close</button>';
+    return;
+  }
+  var ready=B.rows.filter(function(r){return r.status==='ready';}).length;
+  var bad=B.rows.filter(function(r){return r.status==='error'||r.status==='failed';}).length;
+  var done=B.rows.filter(function(r){return r.status==='done';}).length;
+  var label={ready:'Ready',error:'Skipped',creating:'Creating…',done:'✓ Created',failed:'Failed'};
+  var color={ready:'var(--bl)',error:'var(--rd)',creating:'var(--am)',done:'var(--gr)',failed:'var(--rd)'};
+  body.innerHTML=
+    '<div style="font-size:13px;margin-bottom:10px"><strong>'+B.rows.length+'</strong> rows · '+
+      '<span style="color:var(--bl)">'+ready+' ready</span> · '+
+      '<span style="color:var(--gr)">'+done+' created</span> · '+
+      '<span style="color:var(--rd)">'+bad+' with problems</span></div>'+
+    '<div style="border:1px solid var(--b);border-radius:var(--r);overflow:auto;max-height:340px"><table class="pp-tbl"><thead><tr>'+
+      '<th>#</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>'+
+      B.rows.map(function(r){
+        return '<tr><td>'+r.n+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.role)+'</td>'+
+          '<td style="color:'+color[r.status]+';font-weight:600">'+label[r.status]+(r.msg?' — <span style="font-weight:400">'+esc(r.msg)+'</span>':'')+'</td></tr>';
+      }).join('')+'</tbody></table></div>'+
+    (B.created.length?'<div class="pp-note" style="margin-top:12px">Passwords are not stored anywhere. Download the credentials file now and share it securely, then delete it.</div>':'');
+  var btns='';
+  if(!B.running){
+    btns+='<button class="btn" onclick="peopleBulkOpen()">Start over</button>';
+    if(B.created.length) btns+='<button class="btn" onclick="peopleBulkDownload()">⬇️ Download credentials</button>';
+    if(ready) btns+='<button class="btn btn-p" onclick="peopleBulkRun()">Create '+ready+' account'+(ready===1?'':'s')+'</button>';
+    else btns+='<button class="btn btn-p" onclick="document.getElementById(\'mo-pp-bulk\').remove()">Done</button>';
+  } else btns='<span style="font-size:13px;color:var(--mu)">Creating accounts… please keep this window open.</span>';
+  foot.innerHTML=btns;
+}
+
+window.peopleBulkRun=function(){
+  var todo=B.rows.filter(function(r){return r.status==='ready';});
+  if(!todo.length) return;
+  B.running=true; window._ppBusy=true; bulkRender();
+  var p=Promise.resolve();
+  todo.forEach(function(r){
+    p=p.then(function(){
+      r.status='creating'; bulkRender();
+      return createAccount(r.name,r.email,r.password,r.role)
+        .then(function(){ r.status='done'; B.created.push(r); })
+        .catch(function(e){ r.status='failed'; r.msg=friendlyErr(e); });
+    });
+  });
+  p.then(function(){
+    B.running=false; window._ppBusy=false; bulkRender(); loadPeople();
+    showToast('✓ '+B.created.length+' account(s) created.');
+  });
+};
+
+window.peopleBulkDownload=function(){
+  var lines=['Name,Email,Role,Temporary password'];
+  B.created.forEach(function(r){ lines.push([r.name,r.email,r.role,r.password].map(csvCell).join(',')); });
+  download('jic-new-accounts.csv',lines.join('\n'));
+};
+
+// ── Self-registration is now hidden (admin creates all accounts) ──
+var rt=document.getElementById('rtab'); if(rt) rt.style.display='none';
+var lf=document.getElementById('lform');
+if(lf){
+  var hint=document.createElement('div');
+  hint.style.cssText='text-align:center;margin-top:14px;font-size:12px;color:var(--mu)';
+  hint.textContent='Don’t have an account? Please ask your admin.';
+  lf.appendChild(hint);
+}
+doReg=function(){ showAE('Accounts are created by the admin. Please contact them.'); };
+
+// ── Block archived accounts at sign-in ──
+window.addEventListener('load',function(){
+  var tries=0;
+  (function attach(){
+    if(!window.auth||!window.db){ if(tries++<40) return setTimeout(attach,250); return; }
+    auth.onAuthStateChanged(function(u){
+      if(!u) return;
+      db.collection('users').doc(u.uid).get().then(function(d){
+        if(d.exists&&d.data().status==='archived'){
+          auth.signOut().then(function(){
+            setTimeout(function(){ showS('auth'); showAE('This account has been archived. Please contact the admin.'); },300);
+          });
+        }
+      }).catch(function(){});
+    });
+  })();
+});
+
+console.log('JIC IELTS — Admin People tab loaded ✓');
+})();
+</script>
