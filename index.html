@@ -18397,6 +18397,8 @@ document.head.appendChild(css);
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function val(id){ var e=document.getElementById(id); return e?e.value:''; }
 function initials(n){ return (n||'?').split(' ').filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().substring(0,2)||'?'; }
+function rolesOf(u){ return (u.roles&&u.roles.length)?u.roles:(u.role?[u.role]:[]); }
+function hasRole(u,r){ return rolesOf(u).indexOf(r)>-1; }
 function genPassword(){
   var chars='ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', out='';
   var arr=new Uint32Array(10); (window.crypto||window.msCrypto).getRandomValues(arr);
@@ -18445,7 +18447,7 @@ function createAccount(name,email,pw,role){
   return sa.createUserWithEmailAndPassword(email,pw).then(function(c){
     var uid=c.user.uid;
     return db.collection('users').doc(uid).set({
-      name:name, email:email, role:role, status:'active',
+      name:name, email:email, role:role, roles:[role], status:'active',
       createdBy:CU.uid, createdAt:firebase.firestore.FieldValue.serverTimestamp()
     }).then(function(){ return sa.signOut(); }).then(function(){ return uid; })
     .catch(function(err){ return sa.signOut().then(function(){ throw err; }); });
@@ -18476,6 +18478,7 @@ page.innerHTML=
  '<div class="pp-tabs">'+
    '<button class="pp-tab active" id="pp-tab-student" onclick="peopleSetRole(\'student\')">Students</button>'+
    '<button class="pp-tab" id="pp-tab-teacher" onclick="peopleSetRole(\'teacher\')">Teachers</button>'+
+   '<button class="pp-tab" id="pp-tab-admin" onclick="peopleSetRole(\'admin\')">Admins</button>'+
  '</div>'+
  '<div class="card" style="padding:0;overflow:hidden">'+
    '<div style="padding:12px 14px;border-bottom:1px solid var(--b);display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
@@ -18513,14 +18516,16 @@ window.peopleSetQuery=function(q){ S.q=(q||'').toLowerCase(); render(); };
 function isArchived(u){ return u.status==='archived'; }
 
 function render(){
-  var inRole=S.users.filter(function(u){return u.role===S.role;});
+  var inRole=S.users.filter(function(u){return hasRole(u,S.role);});
   var nAct=inRole.filter(function(u){return !isArchived(u);}).length;
   var nArc=inRole.length-nAct;
-  var cS=S.users.filter(function(u){return u.role==='student'&&!isArchived(u);}).length;
-  var cT=S.users.filter(function(u){return u.role==='teacher'&&!isArchived(u);}).length;
+  var cS=S.users.filter(function(u){return hasRole(u,'student')&&!isArchived(u);}).length;
+  var cT=S.users.filter(function(u){return hasRole(u,'teacher')&&!isArchived(u);}).length;
+  var cA=S.users.filter(function(u){return hasRole(u,'admin')&&!isArchived(u);}).length;
   var set=function(id,t,on){ var e=document.getElementById(id); if(e){ e.textContent=t; if(on!==undefined) e.classList.toggle('active',on); } };
   set('pp-tab-student','Students ('+cS+')',S.role==='student');
   set('pp-tab-teacher','Teachers ('+cT+')',S.role==='teacher');
+  set('pp-tab-admin','Admins ('+cA+')',S.role==='admin');
   set('pp-st-active','Active ('+nAct+')',S.status==='active');
   set('pp-st-archived','Archived ('+nArc+')',S.status==='archived');
 
@@ -18540,18 +18545,21 @@ function render(){
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(u.name||'(no name)')+'</div>'+
         '<div style="font-size:12px;color:var(--mu);overflow:hidden;text-overflow:ellipsis">'+esc(u.email||'')+'</div>'+
+        (rolesOf(u).length>1?'<div style="margin-top:3px">'+rolesOf(u).map(function(r){return '<span class="badge b-bl" style="margin-right:4px;font-size:10px">'+r+'</span>';}).join('')+'</div>':'')+
       '</div>'+
       (arc?'<span class="badge b-gy">Archived</span>':'')+
+      '<button class="btn btn-sm" onclick="peopleRolesOpen(\''+u.id+'\')" title="Change roles">🎭 Roles</button>'+
       '<button class="btn btn-sm" data-email="'+esc(u.email)+'" onclick="peopleResetPw(this.dataset.email)" title="Send password reset email">🔑 Reset password</button>'+
       (arc?
         '<button class="btn btn-sm" onclick="peopleArchive(\''+u.id+'\',false)">♻️ Reactivate</button>':
-        '<button class="btn btn-sm btn-d" onclick="peopleArchive(\''+u.id+'\',true)">📦 Archive</button>')+
+        (u.id===CU.uid?'':'<button class="btn btn-sm btn-d" onclick="peopleArchive(\''+u.id+'\',true)">📦 Archive</button>'))+
     '</div>';
   }).join('');
 }
 
 window.peopleArchive=function(id,archive){
   var u=S.users.filter(function(x){return x.id===id;})[0]; if(!u) return;
+  if(id===CU.uid){ showToast("You can't archive your own account.",'err'); return; }
   if(archive && !confirm('Archive '+(u.name||u.email)+'?\n\nThey will no longer be able to sign in. Their data is kept, and you can reactivate them anytime.')) return;
   var data=archive?{status:'archived',archivedAt:firebase.firestore.FieldValue.serverTimestamp()}:{status:'active',archivedAt:null};
   db.collection('users').doc(id).update(data).then(function(){
@@ -18764,6 +18772,61 @@ window.peopleBulkDownload=function(){
   var lines=['Name,Email,Role,Temporary password'];
   B.created.forEach(function(r){ lines.push([r.name,r.email,r.role,r.password].map(csvCell).join(',')); });
   download('jic-new-accounts.csv',lines.join('\n'));
+};
+
+// ── Roles editor ──
+var ROLE_INFO={admin:['🛡 Admin','Manages people, tests and settings'],teacher:['👨‍🏫 Teacher','Creates tests, runs classes, grades results'],student:['📝 Student','Takes tests and joins classes']};
+window.peopleRolesOpen=function(id){
+  var u=S.users.filter(function(x){return x.id===id;})[0]; if(!u) return;
+  closeModal('mo-pp-roles');
+  var cur=rolesOf(u), self=(id===CU.uid);
+  var m=document.createElement('div'); m.className='mo open'; m.id='mo-pp-roles'; m.dataset.uid=id;
+  m.onclick=function(e){ if(e.target===m) closeModal('mo-pp-roles'); };
+  m.innerHTML=
+   '<div class="mb" style="max-width:460px">'+
+     '<div class="mh"><div class="mt">Roles — '+esc(u.name||u.email)+'</div><button class="btn btn-sm" onclick="document.getElementById(\'mo-pp-roles\').remove()">✕</button></div>'+
+     '<div class="mbd">'+
+       '<div class="pp-note">Anyone with more than one role gets a <strong>Switch portal</strong> button at the top of the screen.</div>'+
+       ['admin','teacher','student'].map(function(r){
+         var lock=self&&r==='admin'&&cur.indexOf('admin')>-1;
+         return '<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--b);border-radius:var(--r);margin-bottom:8px;cursor:pointer">'+
+           '<input type="checkbox" id="pprl-'+r+'" '+(cur.indexOf(r)>-1?'checked ':'')+(lock?'disabled ':'')+'onchange="peopleRolesSync()" style="margin-top:3px">'+
+           '<div><div style="font-size:14px;font-weight:600">'+ROLE_INFO[r][0]+(lock?' <span style="font-size:11px;color:var(--mu);font-weight:400">(you can’t remove your own)</span>':'')+'</div>'+
+           '<div style="font-size:12px;color:var(--mu)">'+ROLE_INFO[r][1]+'</div></div></label>';
+       }).join('')+
+       '<div class="fr" style="margin-top:12px"><label class="fl">Opens to (default portal)</label><select class="inp" id="pprl-primary"></select></div>'+
+     '</div>'+
+     '<div class="mf"><button class="btn" onclick="document.getElementById(\'mo-pp-roles\').remove()">Cancel</button>'+
+       '<button class="btn btn-p" onclick="peopleRolesSave()">Save roles</button></div>'+
+   '</div>';
+  document.body.appendChild(m);
+  m._primary=u.role;
+  peopleRolesSync();
+};
+window.peopleRolesSync=function(){
+  var sel=document.getElementById('pprl-primary'); if(!sel) return;
+  var m=document.getElementById('mo-pp-roles');
+  var keep=sel.value||(m&&m._primary);
+  var checked=['admin','teacher','student'].filter(function(r){ var c=document.getElementById('pprl-'+r); return c&&c.checked; });
+  sel.innerHTML=checked.map(function(r){ return '<option value="'+r+'">'+ROLE_INFO[r][0]+'</option>'; }).join('');
+  sel.value=checked.indexOf(keep)>-1?keep:(checked[0]||'');
+};
+window.peopleRolesSave=function(){
+  var m=document.getElementById('mo-pp-roles'); if(!m) return;
+  var id=m.dataset.uid, u=S.users.filter(function(x){return x.id===id;})[0]; if(!u) return;
+  var roles=['admin','teacher','student'].filter(function(r){ return document.getElementById('pprl-'+r).checked; });
+  if(!roles.length){ showToast('Pick at least one role.','err'); return; }
+  var primary=val('pprl-primary'); if(roles.indexOf(primary)<0) primary=roles[0];
+  db.collection('users').doc(id).update({roles:roles,role:primary}).then(function(){
+    u.roles=roles; u.role=primary;
+    if(id===CU.uid){
+      window._myRoles=roles;
+      if(window._myDoc){ window._myDoc.roles=roles; window._myDoc.role=primary; }
+      if(window.refreshPortalSwitch) refreshPortalSwitch();
+    }
+    closeModal('mo-pp-roles'); render();
+    showToast('✓ Roles updated for '+(u.name||u.email)+'. They apply the next time they sign in.');
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
 };
 
 // ── Self-registration is now hidden (admin creates all accounts) ──
@@ -19018,5 +19081,108 @@ tN=function(page,el){
 };
 
 console.log('JIC IELTS — teacher results: student list view loaded ✓');
+})();
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  MULTI-ROLE ACCOUNTS + SWITCH PORTAL
+//  users/{uid}.roles = ['admin','teacher',...]
+//  users/{uid}.role  = default portal (unchanged)
+//  Accounts without "roles" keep working: roles = [role]
+// ═══════════════════════════════════════════════
+(function(){
+
+// TEMPORARY one-time bootstrap: gives these existing staff accounts the listed
+// roles the first time they sign in (runs once per account). Remove this line
+// once roles are managed from People → 🎭 Roles.
+var ROLE_BOOTSTRAP = { 'bplpobre040688@gmail.com': ['admin','teacher'] };
+
+var PORTAL = {
+  admin:   { label:'Admin Portal' },
+  teacher: { label:'Teacher Portal' },
+  student: { label:'Student Portal' }
+};
+window._myRoles = [];
+window._myDoc = null;
+
+function rolesOf(u){ return (u.roles&&u.roles.length)?u.roles:(u.role?[u.role]:[]); }
+
+// Show "🔁 Other Portal" button(s) in the top bar of the portal you're in
+window.refreshPortalSwitch = function(){
+  ['admin','teacher','student'].forEach(function(r){
+    var old=document.getElementById('psw-'+r); if(old&&old.parentNode) old.parentNode.removeChild(old);
+  });
+  var roles=window._myRoles||[];
+  if(roles.length<2||!window.CRole) return;
+  var tb=document.querySelector('#s-'+CRole+' .topbar'); if(!tb) return;
+  var so=tb.querySelector('button[onclick*="doOut"]'); if(!so) return;
+  var wrap=document.createElement('span');
+  wrap.id='psw-'+CRole;
+  wrap.style.cssText='display:inline-flex;gap:6px;margin-right:4px';
+  roles.filter(function(r){ return r!==CRole && PORTAL[r]; }).forEach(function(r){
+    var b=document.createElement('button');
+    b.className='btn btn-sm';
+    b.style.cssText='background:#F3E8FF;color:#6B21A8;border-color:#D8B4FE';
+    b.textContent='🔁 '+PORTAL[r].label;
+    b.onclick=function(){ switchPortal(r); };
+    wrap.appendChild(b);
+  });
+  so.parentNode.insertBefore(wrap,so);
+};
+
+window.switchPortal = function(role){
+  function go(data){
+    CRole=role;
+    if(role==='admin') loadAdmin(data);
+    else if(role==='teacher') loadTeacher(data);
+    else loadStudent(data);
+  }
+  if(window._myDoc) go(window._myDoc);
+  else db.collection('users').doc(CU.uid).get().then(function(s){ if(s.exists) go(s.data()); });
+};
+
+// Re-draw the switch button every time a portal finishes loading
+['loadAdmin','loadTeacher','loadStudent'].forEach(function(fn){
+  var orig=window[fn];
+  if(typeof orig!=='function') return;
+  window[fn]=function(){
+    var r=orig.apply(this,arguments);
+    setTimeout(window.refreshPortalSwitch,350);
+    return r;
+  };
+});
+
+// Read this account's roles after sign-in (and apply the one-time bootstrap)
+window.addEventListener('load',function(){
+  var tries=0;
+  (function attach(){
+    if(!window.auth||!window.db){ if(tries++<40) return setTimeout(attach,250); return; }
+    auth.onAuthStateChanged(function(u){
+      if(!u){ window._myRoles=[]; window._myDoc=null; return; }
+      db.collection('users').doc(u.uid).get().then(function(snap){
+        if(!snap.exists) return null;
+        var d=snap.data();
+        var want=ROLE_BOOTSTRAP[(u.email||'').toLowerCase()];
+        var isStaff=(d.role==='admin'||d.role==='teacher');
+        if(want&&isStaff&&!d.rolesBootstrapped){
+          var merged=rolesOf(d).slice();
+          want.forEach(function(r){ if(merged.indexOf(r)<0) merged.push(r); });
+          return snap.ref.update({roles:merged,rolesBootstrapped:true}).then(function(){
+            d.roles=merged; d.rolesBootstrapped=true; return d;
+          });
+        }
+        return d;
+      }).then(function(d){
+        if(!d) return;
+        window._myDoc=d;
+        window._myRoles=rolesOf(d);
+        setTimeout(window.refreshPortalSwitch,300);
+        setTimeout(window.refreshPortalSwitch,1500);
+      }).catch(function(e){ console.error('roles load error',e); });
+    });
+  })();
+});
+
+console.log('JIC IELTS — multi-role + switch portal loaded ✓');
 })();
 </script>
