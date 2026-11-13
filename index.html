@@ -19186,3 +19186,83 @@ window.addEventListener('load',function(){
 console.log('JIC IELTS — multi-role + switch portal loaded ✓');
 })();
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: Summary Completion paragraph was lost on reload
+//  normalizeGroup() only copied a short list of fields, so the
+//  paragraph (and other group settings) vanished whenever a test
+//  was reopened or loaded for a student. It now keeps every field.
+// ═══════════════════════════════════════════════
+(function(){
+
+// 1) Keep ALL saved fields on each question group
+normalizeGroup = function(g){
+  var ng = Object.assign({}, g);
+  ng.type        = g.type||'fill';
+  ng.fromQ       = g.fromQ||1;
+  ng.toQ         = g.toQ||1;
+  ng.instruction = g.instruction||'';
+  ng.wordLimit   = g.wordLimit||'';
+  ng.questions   = g.questions||[];
+  ng.wordBox     = g.wordBox||[];
+  ng.headingsList= g.headingsList||[];
+  ng.matchOptions= g.matchOptions||[];
+  ng.tableData   = g.tableData ? unflattenTableData(g.tableData) : null;
+  ng.image       = g.image||null;
+  // Recovery: a summary group that lost its blank list gets it back from its questions,
+  // so only the paragraph text has to be typed again.
+  if((ng.type==='summary1'||ng.type==='summary2') && !(ng.summaryAnswers&&ng.summaryAnswers.length) && ng.questions.length){
+    ng.summaryAnswers = ng.questions.map(function(q){ return {qNum:q.num, answer:q.answer||''}; });
+  }
+  return ng;
+};
+
+function markerNums(txt){
+  var re=/\[Q(\d+)\]/gi, m, out=[];
+  while((m=re.exec(txt||''))!==null){ var n=parseInt(m[1],10); if(out.indexOf(n)<0) out.push(n); }
+  return out.sort(function(a,b){return a-b;});
+}
+
+// 2) Don't allow saving a Summary Completion group without its paragraph / blanks
+var _saveQGsum = saveQG;
+saveQG = function(){
+  var tyEl=document.getElementById('qg-ty'), ty=tyEl&&tyEl.value;
+  if(ty==='summary1'||ty==='summary2'){
+    var txt=(document.getElementById('qg-sum-txt')||{}).value||'';
+    var nums=markerNums(txt);
+    if(!nums.length){
+      showToast('Add the summary paragraph, with a [Q11]-style marker where each blank goes.','err'); return;
+    }
+    var have=(window.sumBlanks||[]).map(function(b){return b.qNum;}).sort(function(a,b){return a-b;});
+    if(have.join(',')!==nums.join(',')){
+      showToast('The blanks changed — click “Detect blanks” and fill in each answer, then save.','err'); return;
+    }
+  }
+  _saveQGsum();
+};
+
+// Same protection when editing an existing group
+var _updateQGsum = updateQG;
+updateQG = function(){
+  var t=document.getElementById('eqg-sum-txt');
+  if(t && !markerNums(t.value).length){
+    showToast('The summary paragraph needs a [Q11]-style marker for each blank.','err'); return;
+  }
+  _updateQGsum();
+};
+
+// 3) Warn on the teacher's group card when a summary group has no paragraph
+var _rendQGCardSum = rendQGCard;
+rendQGCard = function(g,gi,mod,sp){
+  var h=_rendQGCardSum(g,gi,mod,sp);
+  if((g.type==='summary1'||g.type==='summary2') && !g.summaryText){
+    h=h.replace('<div class="qb-body">',
+      '<div class="qb-body"><div style="background:var(--aml);color:var(--am);border:1px solid var(--am);border-radius:var(--r);padding:8px 12px;margin-bottom:10px;font-size:12px;line-height:1.6">'+
+      '⚠️ <strong>No summary paragraph.</strong> Students only see numbered boxes. Click <strong>✏️ Edit</strong> and paste the paragraph with a [Q'+g.fromQ+']-style marker for each blank.</div>');
+  }
+  return h;
+};
+
+console.log('JIC IELTS — summary completion paragraph fix loaded ✓');
+})();
+</script>
