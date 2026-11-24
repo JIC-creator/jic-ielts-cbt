@@ -19435,26 +19435,36 @@ window.sumDDOpen=function(sel){
 window.sumDDClose=function(sel){
   for(var i=0;i<sel.options.length;i++){ var o=sel.options[i]; o.textContent=o.value||'—'; }
 };
-function letteredSummary(g){
+function letteredSummary(g, withLetters){
+  if(withLetters===undefined) withLetters=true;
   var tl=(QTYPES.find(function(t){return t.v===g.type;})||{l:'Summary Completion'}).l;
   var words=g.wordBox||[];
   var h='<div class="prev-qblock"><div class="prev-qtl">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>';
   if(g.instruction) h+='<div class="prev-inst">'+renderBold(g.instruction)+(g.wordLimit?' <strong>'+g.wordLimit+'</strong>':'')+'</div>';
   if(g.summaryTitle) h+=titleHTML(g.summaryTitle);
-  var opts='<option value="" data-full="— Select an answer">—</option>'+words.map(function(w,i){
-    return '<option value="'+LET[i]+'" data-full="'+LET[i]+' — '+esc(w)+'">'+LET[i]+'</option>';
-  }).join('');
+  var opts = withLetters
+    ? '<option value="" data-full="— Select an answer">—</option>'+words.map(function(w,i){
+        return '<option value="'+LET[i]+'" data-full="'+LET[i]+' — '+esc(w)+'">'+LET[i]+'</option>';
+      }).join('')
+    : '<option value="">— Select an answer —</option>'+words.map(function(w){
+        return '<option value="'+esc(w)+'">'+esc(w)+'</option>';
+      }).join('');
   var para=renderBold(g.summaryText).replace(/\[Q(\d+)\]/gi,function(m,qn){
     var n=parseInt(qn,10);
     return '<strong style="margin:0 6px 0 2px">'+n+'</strong>'+
-      '<select class="prev-fb" style="width:88px;cursor:pointer;border:1.5px solid var(--bl);border-radius:6px;background:var(--s);padding:3px 6px;font-weight:600" '+
-      'onfocus="sumDDOpen(this)" onmousedown="sumDDOpen(this)" onblur="sumDDClose(this)" '+
-      'onchange="prevAnswers['+n+']=this.value;sumDDClose(this)">'+opts+'</select>';
+      (withLetters
+        ? '<select class="prev-fb" style="width:88px;cursor:pointer;border:1.5px solid var(--bl);border-radius:6px;background:var(--s);padding:3px 6px;font-weight:600" '+
+          'onfocus="sumDDOpen(this)" onmousedown="sumDDOpen(this)" onblur="sumDDClose(this)" '+
+          'onchange="prevAnswers['+n+']=this.value;sumDDClose(this)">'+opts+'</select>'
+        : '<select class="prev-fb" style="min-width:170px;max-width:100%;cursor:pointer;border:1.5px solid var(--bl);border-radius:6px;background:var(--s);padding:3px 6px;font-weight:600" '+
+          'onchange="prevAnswers['+n+']=this.value">'+opts+'</select>');
   });
   h+='<div style="line-height:2.3;font-size:14px;margin-bottom:6px">'+para+'</div>';
   h+='<div style="border:1.5px solid var(--t);border-radius:4px;padding:14px 16px;margin-top:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px 18px;font-size:13px;line-height:1.5">'+
     words.map(function(w,i){
-      return '<div style="display:flex;gap:10px"><strong style="width:18px;flex-shrink:0">'+LET[i]+'</strong><span>'+esc(w)+'</span></div>';
+      return withLetters
+        ? '<div style="display:flex;gap:10px"><strong style="width:18px;flex-shrink:0">'+LET[i]+'</strong><span>'+esc(w)+'</span></div>'
+        : '<div style="display:flex;gap:10px"><span>•</span><span>'+esc(w)+'</span></div>';
     }).join('')+'</div>';
   h+='</div>';
   return h;
@@ -19462,7 +19472,7 @@ function letteredSummary(g){
 var _buildPrevQBlock=buildPrevQBlock;
 buildPrevQBlock=function(g,getQNum){
   if(isSum(g.type) && g.summaryText){
-    if(g.type==='summary2' && g.wordBoxLettered && (g.wordBox||[]).length) return letteredSummary(g);
+    if(g.type==='summary2' && (g.wordBox||[]).length) return letteredSummary(g, g.wordBoxLettered===true);
     var h=_buildPrevQBlock(g,getQNum);
     if(g.summaryTitle) h=h.replace('<div class="prev-stem" style="line-height:2.4',titleHTML(g.summaryTitle)+'<div class="prev-stem" style="line-height:2.4');
     return h;
