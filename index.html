@@ -10593,7 +10593,7 @@ function submitTest(){
     studentName: document.getElementById('s-name').textContent,
     testId: testState.testId,
     testName: testState.testData&&testState.testData.name||'Test',
-    teacherId: testState.testData&&testState.testData.teacherId||testState.assignment&&testState.assignment.teacherId||'',
+    teacherId: (testState.assignment&&testState.assignment.teacherId)||(testState.testData&&testState.testData.teacherId)||'',
     module: mod,
     answers: testState.answers,
     score: score,
@@ -10881,7 +10881,7 @@ function fetchAndShowAssignStudents(){
   if(el) el.innerHTML='<div style="padding:12px;color:var(--mu);font-size:13px">Loading students...</div>';
   db.collection('users').where('role','==','student').get().then(function(snap){
     allStudentsForAssign = [];
-    snap.forEach(function(d){ allStudentsForAssign.push(Object.assign({id:d.id}, d.data())); });
+    snap.forEach(function(d){ if(d.data().status!=='archived') allStudentsForAssign.push(Object.assign({id:d.id}, d.data())); });
     // Update allUsers too
     snap.forEach(function(d){
       var exists = allUsers.find(function(u){ return u.id===d.id; });
@@ -12112,8 +12112,8 @@ submitTest = function(){
     testId: testState.testId,
     testName: testState.testData&&testState.testData.name||'Test',
     testType: testState.testData&&testState.testData.type||'Academic',
-    teacherId: testState.testData&&testState.testData.teacherId||
-               (testState.assignment&&testState.assignment.teacherId)||'',
+    teacherId: (testState.assignment&&testState.assignment.teacherId)||
+               (testState.testData&&testState.testData.teacherId)||'',
     module: mod,
     answers: testState.answers,
     score: score,
@@ -12957,8 +12957,8 @@ submitTest = function(){
     testId: testState.testId,
     testName: testState.testData&&testState.testData.name||'Test',
     testType: testState.testData&&testState.testData.type||'Academic',
-    teacherId: testState.testData&&testState.testData.teacherId||
-               (testState.assignment&&testState.assignment.teacherId)||'',
+    teacherId: (testState.assignment&&testState.assignment.teacherId)||
+               (testState.testData&&testState.testData.teacherId)||'',
     module: mod,
     answers: testState.answers,
     score: score,
@@ -18905,6 +18905,7 @@ console.log('JIC IELTS — admin shared tests list restored ✓');
 (function(){
 
 var resView = {studentId:null, q:''};
+window.resResetView=function(){ resView.studentId=null; resView.q=''; };
 
 var css = document.createElement('style');
 css.textContent = [
@@ -18932,8 +18933,9 @@ function dedupe(list){
 }
 
 function ensureShell(){
-  var ap=document.getElementById('ta-results'); if(!ap) return false;
-  if(document.getElementById('res-shell')) return true;
+  var ap=document.getElementById(window.CRole==='admin'?'aa-aresults':'ta-results'); if(!ap) return false;
+  var ex=document.getElementById('res-shell');
+  if(ex){ if(ex.parentNode!==ap){ ap.innerHTML=''; ap.appendChild(ex); } return true; }
   ap.innerHTML=
    '<div id="res-shell">'+
      '<div id="res-list-view">'+
@@ -19814,6 +19816,45 @@ window.subDelete=function(id,btn){
   }).catch(function(e){ unbusy(btn); showToast(e.message,'err'); });
 };
 
+/* (Shared tests decoration moved to the admin sharing block) */
+
+console.log('JIC IELTS — teacher → admin share (simple) loaded ✓');
+})();
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  ADMIN SHARING: teachers (all / specific) + students
+//  • Admin picks per test: Draft · All teachers · Specific teachers
+//  • Teachers who receive a test can view it, assign the ORIGINAL to
+//    their own students, or duplicate it
+//  • Admin can also assign a test straight to students, and manage
+//    those results (grade Writing, release scores) on "Assigned results"
+//  Test fields: visibility 'draft'|'shared'(all teachers)|'specific',
+//               sharedWithTeachers:[uid…]
+// ═══════════════════════════════════════════════
+(function(){
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function stamp(){ return firebase.firestore.FieldValue.serverTimestamp(); }
+function rolesOf(u){ return (u.roles&&u.roles.length)?u.roles:(u.role?[u.role]:[]); }
+function closeModal(id){ var m=document.getElementById(id); if(m&&m.parentNode) m.parentNode.removeChild(m); }
+
+// Read-only look at a test (annotating is off for the 'viewer' role)
+window.viewTestReadOnly=function(testId){
+  db.collection('tests').doc(testId).get().then(function(td){
+    if(!td.exists){ showToast('This test is no longer available.','err'); return; }
+    return db.collection('tests').doc(testId).collection('content').doc('data').get().then(function(c){
+      enterClassroom(testId,td.data(),c.exists?normalizeTC(c.data()):null,'viewer');
+    });
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+};
+
+// ───────────── ADMIN: Shared tests cards ─────────────
+function shareLabel(t){
+  if(t.visibility==='shared') return {txt:'🌐 All teachers',bg:'var(--grl)',fg:'var(--gr)',bd:'var(--gr)'};
+  if(t.visibility==='specific'){ var n=(t.sharedWithTeachers||[]).length; return {txt:'👥 '+n+' teacher'+(n===1?'':'s'),bg:'var(--bll)',fg:'var(--bl)',bd:'var(--bl)'}; }
+  return {txt:'🔒 Draft · Share…',bg:'var(--bg)',fg:'var(--mu)',bd:'var(--bm)'};
+}
 function decorateShared(){
   var el=document.getElementById('shared-list'); if(!el) return;
   var cards=el.querySelectorAll('.tc'); if(!cards.length) return;
@@ -19821,19 +19862,31 @@ function decorateShared(){
     var info={}; snap.forEach(function(d){ info[d.id]=d.data(); });
     cards.forEach(function(card){
       var m=(card.getAttribute('onclick')||'').match(/openEdit\('([^']+)'/); if(!m) return;
-      var t=info[m[1]]; if(!t) return;
+      var tid=m[1], t=info[tid]; if(!t) return;
       card.querySelectorAll('.src-extra').forEach(function(n){ n.parentNode.removeChild(n); });
-      var meta=card.querySelector('div[style*="font-size:12px"]');
-      if(t.sourceTeacherName && meta && meta.parentNode){
+      var meta=card.querySelector('div[style*="font-size:12px"]'), box=meta&&meta.parentNode;
+      if(t.sourceTeacherName && box){
         var line=document.createElement('div'); line.className='src-extra'; line.style.cssText='font-size:11px;color:var(--mu);margin-top:3px';
-        line.textContent='📥 from '+t.sourceTeacherName; meta.parentNode.appendChild(line);
+        line.textContent='📥 from '+t.sourceTeacherName; box.appendChild(line);
       }
-      if(m[1]===window._justSavedTestId){
+      // swap the old Shared/Draft toggle for Share… and add Assign
+      var tog=card.querySelector('button[onclick*="toggleVisibility"]');
+      var del=card.querySelector('button.btn-d');
+      var lab=shareLabel(t);
+      var sb=document.createElement('button'); sb.className='btn btn-sm src-extra';
+      sb.style.cssText='margin-left:6px;flex-shrink:0;background:'+lab.bg+';color:'+lab.fg+';border-color:'+lab.bd;
+      sb.textContent=lab.txt; sb.title='Choose which teachers can use this test';
+      sb.onclick=function(e){ e.stopPropagation(); openAdminShare(tid); };
+      var ab=document.createElement('button'); ab.className='btn btn-sm btn-assign src-extra';
+      ab.style.cssText='margin-left:6px;flex-shrink:0'; ab.textContent='👥 Assign'; ab.title='Assign this test to students';
+      ab.onclick=function(e){ e.stopPropagation(); openAssignModal(tid,t.name||'Test'); };
+      if(tog){ tog.parentNode.insertBefore(sb,tog); tog.parentNode.insertBefore(ab,tog); tog.parentNode.removeChild(tog); }
+      else if(del){ card.insertBefore(sb,del); card.insertBefore(ab,del); }
+      else { card.appendChild(sb); card.appendChild(ab); }
+      if(tid===window._justSavedTestId){
         card.style.boxShadow='0 0 0 2px var(--gr)'; card.style.background='var(--grl)';
-        if(meta&&meta.parentNode){
-          var b=document.createElement('div'); b.className='src-extra'; b.style.cssText='font-size:11px;font-weight:700;color:var(--gr);margin-top:3px';
-          b.textContent='🆕 Just saved — it’s a draft until you set it to Shared'; meta.parentNode.appendChild(b);
-        }
+        if(box){ var b=document.createElement('div'); b.className='src-extra'; b.style.cssText='font-size:11px;font-weight:700;color:var(--gr);margin-top:3px';
+          b.textContent='🆕 Just saved — it’s a draft until you share it'; box.appendChild(b); }
         try{ card.scrollIntoView({block:'center'}); }catch(e){}
       }
     });
@@ -19842,6 +19895,151 @@ function decorateShared(){
 var sl=document.getElementById('shared-list');
 if(sl) new MutationObserver(function(){ decorateShared(); }).observe(sl,{childList:true});
 
-console.log('JIC IELTS — teacher → admin share (simple) loaded ✓');
+// ───────────── ADMIN: Share window ─────────────
+var AS={testId:null,name:'',teachers:[],selected:{},mode:'draft',before:null};
+
+window.openAdminShare=function(testId){
+  Promise.all([db.collection('tests').doc(testId).get(), db.collection('users').get()]).then(function(r){
+    if(!r[0].exists){ showToast('Test not found.','err'); return; }
+    var t=r[0].data(), teachers=[];
+    r[1].forEach(function(d){ var u=d.data(); u.id=d.id; if(rolesOf(u).indexOf('teacher')>-1 && u.status!=='archived') teachers.push(u); });
+    teachers.sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+    AS.testId=testId; AS.name=t.name||'Test'; AS.teachers=teachers;
+    AS.mode=t.visibility==='shared'?'all':(t.visibility==='specific'?'specific':'draft');
+    AS.selected={}; (t.sharedWithTeachers||[]).forEach(function(id){ AS.selected[id]=true; });
+    AS.before=recipients(AS.mode,AS.selected);
+    closeModal('mo-ashare');
+    var m=document.createElement('div'); m.className='mo open'; m.id='mo-ashare';
+    m.onclick=function(e){ if(e.target===m) closeModal('mo-ashare'); };
+    m.innerHTML=
+     '<div class="mb" style="max-width:520px;max-height:90vh;display:flex;flex-direction:column">'+
+       '<div class="mh"><div class="mt">Share “'+esc(AS.name)+'”</div><button class="btn btn-sm" onclick="document.getElementById(\'mo-ashare\').remove()">✕</button></div>'+
+       '<div class="mbd" style="overflow-y:auto;flex:1">'+
+         '<div style="font-size:13px;color:var(--mu);margin-bottom:12px">Teachers who receive it can view it and assign the original to their own students. Students only see a test once it is assigned to them.</div>'+
+         ['draft:🔒 Draft — only you can see it','shared:🌐 All teachers','specific:👥 Specific teachers'].map(function(o){
+           var v=o.split(':')[0], lbl=o.slice(o.indexOf(':')+1);
+           return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--b);border-radius:var(--r);margin-bottom:8px;cursor:pointer">'+
+             '<input type="radio" name="ashare-mode" value="'+v+'"'+(AS.mode===v?' checked':'')+' onchange="adminShareMode(\''+v+'\')"> <span style="font-size:14px;font-weight:600">'+lbl+'</span></label>';
+         }).join('')+
+         '<div id="ashare-teachers" style="display:'+(AS.mode==='specific'?'block':'none')+';margin-top:8px">'+
+           '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">'+
+             '<input class="inp" id="ashare-search" placeholder="Search teachers..." oninput="adminShareList()" style="flex:1;min-width:160px">'+
+             '<button class="btn btn-sm btn-p" onclick="adminShareAll(true)">Select all</button>'+
+             '<button class="btn btn-sm" onclick="adminShareAll(false)">Clear</button></div>'+
+           '<div id="ashare-list" style="border:1px solid var(--b);border-radius:var(--r);max-height:240px;overflow-y:auto"></div>'+
+           '<div id="ashare-count" style="font-size:12px;color:var(--mu);margin-top:6px"></div>'+
+         '</div>'+
+       '</div>'+
+       '<div class="mf"><button class="btn" onclick="document.getElementById(\'mo-ashare\').remove()">Cancel</button>'+
+         '<button class="btn btn-p" id="ashare-save" onclick="adminShareSave()">Save</button></div>'+
+     '</div>';
+    document.body.appendChild(m);
+    adminShareList();
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+};
+window.adminShareMode=function(v){
+  AS.mode=v; var box=document.getElementById('ashare-teachers'); if(box) box.style.display=v==='specific'?'block':'none';
+};
+window.adminShareList=function(){
+  var el=document.getElementById('ashare-list'); if(!el) return;
+  var q=((document.getElementById('ashare-search')||{}).value||'').toLowerCase();
+  var list=AS.teachers.filter(function(u){ return !q||(u.name||'').toLowerCase().indexOf(q)>-1||(u.email||'').toLowerCase().indexOf(q)>-1; });
+  el.innerHTML=list.length?list.map(function(u){
+    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--b);cursor:pointer">'+
+      '<input type="checkbox" data-uid="'+u.id+'"'+(AS.selected[u.id]?' checked':'')+' onchange="adminShareToggle(this)">'+
+      '<div><div style="font-size:13px;font-weight:500">'+esc(u.name||'(no name)')+'</div><div style="font-size:12px;color:var(--mu)">'+esc(u.email||'')+'</div></div></label>';
+  }).join(''):'<div style="padding:14px;text-align:center;color:var(--mu);font-size:13px">No teachers found.</div>';
+  adminShareCount();
+};
+window.adminShareToggle=function(cb){ if(cb.checked) AS.selected[cb.dataset.uid]=true; else delete AS.selected[cb.dataset.uid]; adminShareCount(); };
+window.adminShareAll=function(on){
+  AS.teachers.forEach(function(u){ if(on) AS.selected[u.id]=true; else delete AS.selected[u.id]; });
+  adminShareList();
+};
+function adminShareCount(){ var c=document.getElementById('ashare-count'); if(c) c.textContent=Object.keys(AS.selected).length+' of '+AS.teachers.length+' teachers selected'; }
+function recipients(mode,selected){
+  var set={};
+  if(mode==='shared') AS.teachers.forEach(function(u){ set[u.id]=true; });
+  else if(mode==='specific') Object.keys(selected).forEach(function(id){ set[id]=true; });
+  return set;
+}
+window.adminShareSave=function(){
+  var mode=AS.mode, ids=Object.keys(AS.selected);
+  if(mode==='specific' && !ids.length){ showToast('Pick at least one teacher, or choose All teachers.','err'); return; }
+  var btn=document.getElementById('ashare-save'); if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
+  var vis=mode==='all'?'shared':mode;           // radio value is 'shared' for all teachers
+  vis=(mode==='shared')?'shared':(mode==='specific'?'specific':'draft');
+  var after=recipients(mode,AS.selected), before=AS.before||{};
+  var gained=Object.keys(after).filter(function(id){ return !before[id]; });
+  db.collection('tests').doc(AS.testId).update({visibility:vis, sharedWithTeachers:mode==='specific'?ids:[]}).then(function(){
+    return Promise.all(gained.map(function(uid){
+      return db.collection('notifications').add({teacherId:uid,type:'test_shared',fromName:'Admin',testName:AS.name,read:false,createdAt:stamp()});
+    }));
+  }).then(function(){
+    closeModal('mo-ashare');
+    showToast(mode==='draft'?'Now a draft — teachers can no longer see it.':
+      mode==='shared'?'✓ Shared with all teachers.':'✓ Shared with '+ids.length+' teacher'+(ids.length===1?'':'s')+'.');
+    loadShared();
+  }).catch(function(e){ if(btn){ btn.disabled=false; btn.textContent='Save'; } showToast(e.message,'err'); });
+};
+
+// ───────────── TEACHER: Shared tests page ─────────────
+loadSharedForT=function(){
+  var el=document.getElementById('t-shared'); if(!el||!window.CU) return;
+  Promise.all([
+    db.collection('tests').where('owner','==','admin').where('visibility','==','shared').get(),
+    db.collection('tests').where('sharedWithTeachers','array-contains',CU.uid).get(),
+    db.collection('test_shares').where('sharedWithId','==',CU.uid).get()
+  ]).then(function(res){
+    var tests=[], seen={};
+    res[0].forEach(function(d){ seen[d.id]=1; tests.push(Object.assign({id:d.id,shareType:'admin'},d.data())); });
+    res[1].forEach(function(d){ var t=d.data(); if(t.owner==='admin'&&t.visibility==='specific'&&!seen[d.id]){ seen[d.id]=1; tests.push(Object.assign({id:d.id,shareType:'admin'},t)); } });
+    var shares=[]; res[2].forEach(function(d){ shares.push(d.data()); });
+    return Promise.all(shares.map(function(sh){
+      return db.collection('tests').doc(sh.testId).get().then(function(td){
+        return td.exists?Object.assign({id:td.id,shareType:'teacher',sharedBy:sh.ownerName},td.data()):null;
+      }).catch(function(){ return null; });
+    })).then(function(list){
+      list.forEach(function(t){ if(t&&!seen[t.id]){ seen[t.id]=1; tests.push(t); } });
+      rendSharedForTeacher(tests);
+    });
+  }).catch(function(e){ console.error('teacher shared',e); });
+};
+var _tN=tN;
+tN=function(page,el){ _tN(page,el); if(page==='shared') loadSharedForT(); };
+
+// admin-shared cards get View + Assign (the original test is used, not a copy)
+function decorateTeacherShared(){
+  var el=document.getElementById('t-shared'); if(!el) return;
+  el.querySelectorAll('.tc').forEach(function(card){
+    if(!/Shared by Admin/.test(card.textContent)) return;
+    var dup=card.querySelector('button[onclick*="duplicateTest"]'); if(!dup) return;
+    var m=(dup.getAttribute('onclick')||'').match(/duplicateTest\('([^']+)','((?:[^'\\]|\\.)*)'/); if(!m) return;
+    card.querySelectorAll('.tsh-extra').forEach(function(n){ n.parentNode.removeChild(n); });
+    var tid=m[1], name=m[2].replace(/\\'/g,"'");
+    var v=document.createElement('button'); v.className='btn btn-sm tsh-extra'; v.style.marginLeft='8px'; v.textContent='🏫 Classroom';
+    v.title='Open the test in view-only mode'; v.onclick=function(e){ e.stopPropagation(); viewTestReadOnly(tid); };
+    var a=document.createElement('button'); a.className='btn btn-sm btn-assign tsh-extra'; a.style.marginLeft='6px'; a.textContent='👥 Assign';
+    a.title='Assign the original test to your students'; a.onclick=function(e){ e.stopPropagation(); openAssignModal(tid,name); };
+    dup.parentNode.insertBefore(v,dup); dup.parentNode.insertBefore(a,dup);
+  });
+}
+var ts=document.getElementById('t-shared');
+if(ts) new MutationObserver(function(){ decorateTeacherShared(); }).observe(ts,{childList:true});
+
+// ───────────── ADMIN: results of tests the admin assigned ─────────────
+var rn=document.querySelectorAll('#s-admin .ni'), allRes=null;
+rn.forEach(function(n){ if((n.getAttribute('onclick')||'').indexOf("aN('results'")===0) allRes=n; });
+var arNav=document.createElement('div'); arNav.className='ni'; arNav.setAttribute('onclick',"aN('aresults',this)"); arNav.textContent='📝 Assigned results';
+if(allRes) allRes.parentNode.insertBefore(arNav,allRes.nextSibling);
+var arPage=document.createElement('div'); arPage.className='ap mcn'; arPage.id='aa-aresults';
+document.getElementById('admin-main').appendChild(arPage);
+var _aN2=aN;
+aN=function(pg,el){
+  _aN2(pg,el);
+  if(pg==='aresults'){ if(window.resResetView) resResetView(); loadTeacherResults(); }
+};
+
+console.log('JIC IELTS — admin sharing (teachers + students) loaded ✓');
 })();
 </script>
