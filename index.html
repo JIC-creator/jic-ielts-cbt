@@ -19244,8 +19244,10 @@ saveQG = function(){
 // Same protection when editing an existing group
 var _updateQGsum = updateQG;
 updateQG = function(){
+  // Only Summary Completion groups need the paragraph (the box exists, hidden, for every type)
+  var tyEl=document.getElementById('eqg-ty'), ty=tyEl&&tyEl.value;
   var t=document.getElementById('eqg-sum-txt');
-  if(t && !markerNums(t.value).length){
+  if((ty==='summary1'||ty==='summary2') && t && !markerNums(t.value).length){
     showToast('The summary paragraph needs a [Q11]-style marker for each blank.','err'); return;
   }
   _updateQGsum();
@@ -19264,5 +19266,270 @@ rendQGCard = function(g,gi,mod,sp){
 };
 
 console.log('JIC IELTS — summary completion paragraph fix loaded ✓');
+})();
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  SUMMARY COMPLETION — title + lettered word box (A, B, C…)
+//  + restore typed/selected answers when a student switches
+//  Part / Passage and comes back
+// ═══════════════════════════════════════════════
+(function(){
+
+var LET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function isSum(t){ return t==='summary1'||t==='summary2'; }
+function curType(pfx){ var t=document.getElementById(pfx+'-ty'); return t?t.value:''; }
+function lettered(pfx){ var c=document.getElementById(pfx+'-wb-lettered'); return !!(c&&c.checked); }
+function groupsOf(ctx){
+  var tc=getTC();
+  return ctx.mod==='listening' ? tc.listening.sections[ctx.sp].groups : tc.reading.passages[ctx.sp].groups;
+}
+
+// ── Teacher builder: title field + "letter the words" option ──
+function injectExtras(pfx, g){
+  var ta=document.getElementById(pfx+'-sum-txt');
+  if(ta && !document.getElementById(pfx+'-sum-title')){
+    var holder=ta.closest('.fr')||ta.parentNode;
+    var box=document.createElement('div'); box.className='fr';
+    box.innerHTML='<label class="fl">Summary title (optional)</label>'+
+      '<input class="inp" id="'+pfx+'-sum-title" placeholder="e.g. Sugar cultivation and production" value="'+esc(g&&g.summaryTitle||'')+'">'+
+      '<div style="font-size:11px;color:var(--mu);margin-top:4px">Shown centered above the paragraph. Leave empty if the summary has no title.</div>';
+    holder.parentNode.insertBefore(box,holder);
+  }
+  var tags=document.getElementById(pfx+'-wbt');
+  if(tags && !document.getElementById(pfx+'-wb-lettered')){
+    var row=document.createElement('div');
+    row.style.cssText='margin-bottom:8px;padding:8px 10px;background:var(--bll);border-radius:var(--r)';
+    row.innerHTML='<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">'+
+      '<input type="checkbox" id="'+pfx+'-wb-lettered" onchange="sumLetterToggle(\''+pfx+'\')"'+((g?g.wordBoxLettered===true:true)?' checked':'')+'> '+
+      '<span><strong>Letter the words</strong> (A, B, C…) — students answer with the letter</span></label>'+
+      '<div style="font-size:11px;color:var(--mu);margin-top:4px">Letters follow the order of the words. If you remove or add a word, re-check the answers below.</div>';
+    tags.parentNode.insertBefore(row,tags);
+  }
+}
+
+// Answer fields for the blanks: letter dropdowns (lettered) or typed text (not lettered)
+function renderSumAns(pfx){
+  var el=document.getElementById(pfx+'-sum-ans'); if(!el) return;
+  var blanks=window.sumBlanks||[];
+  if(!blanks.length){ el.innerHTML='<div style="color:var(--mu);font-size:12px">No [Qn] markers found.</div>'; return; }
+  var useLetters=curType(pfx)==='summary2' && lettered(pfx);
+  var words=window.qgWB||[];
+  el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+blanks.map(function(b){
+    var circle='<div style="width:34px;height:34px;border-radius:50%;background:var(--bll);color:var(--bl);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">Q'+b.qNum+'</div>';
+    var ctl;
+    if(useLetters){
+      // an older answer that is a word from the box becomes its letter
+      var a=String(b.answer||'').trim();
+      if(!/^[A-Za-z]$/.test(a)){
+        var idx=words.findIndex(function(w){return String(w).trim().toLowerCase()===a.toLowerCase();});
+        b.answer = idx>-1 ? LET[idx] : '';
+      } else b.answer=a.toUpperCase();
+      ctl='<select class="inp" onchange="sumSetAns('+b.qNum+',this.value)"><option value="">Choose letter…</option>'+
+        words.map(function(w,i){ return '<option value="'+LET[i]+'"'+(b.answer===LET[i]?' selected':'')+'>'+LET[i]+' — '+esc(w)+'</option>'; }).join('')+'</select>';
+    } else {
+      ctl='<input class="inp" placeholder="Answer for Q'+b.qNum+' (use parentheses for optional words)" value="'+esc(b.answer||'')+'" oninput="sumSetAns('+b.qNum+',this.value)">';
+    }
+    return '<div style="display:flex;align-items:center;gap:8px">'+circle+ctl+'</div>';
+  }).join('')+'</div>';
+}
+window.sumSetAns=function(n,v){ var b=(window.sumBlanks||[]).find(function(x){return x.qNum==n;}); if(b) b.answer=v; };
+window.sumLetterToggle=function(pfx){
+  if(pfx==='qg') rendWBT(); else rendWBT2('eqg-wbt','eqg');
+  renderSumAns(pfx);
+};
+
+// Word-box tags show their letter; answer dropdowns follow the word list
+function relabelTags(elId,pfx){
+  var el=document.getElementById(elId); if(!el) return;
+  if(curType(pfx)==='summary2' && lettered(pfx)){
+    el.querySelectorAll('.wbt').forEach(function(sp,i){
+      sp.insertAdjacentHTML('afterbegin','<strong style="margin-right:4px;color:var(--bl)">'+(LET[i]||'?')+'.</strong>');
+    });
+  }
+  if((window.sumBlanks||[]).length) renderSumAns(pfx);
+}
+var _rendWBT=rendWBT;   rendWBT=function(){ _rendWBT(); relabelTags('qg-wbt','qg'); };
+var _rendWBT2=rendWBT2; rendWBT2=function(a,b){ _rendWBT2(a,b); relabelTags(a,b); };
+
+var _detect=detectSumBlanks;         detectSumBlanks=function(){ _detect(); renderSumAns('qg'); };
+var _detectE=detectEditSumBlanks;    detectEditSumBlanks=function(){ _detectE(); renderSumAns('eqg'); };
+
+var _openQG=openQG;
+openQG=function(mod,sp){ _openQG(mod,sp); injectExtras('qg',null); };
+var _onQGTy=onQGTy;
+onQGTy=function(){ _onQGTy(); injectExtras('qg',null); rendWBT(); };
+var _openEditQG=openEditQG;
+openEditQG=function(mod,sp,gi){
+  _openEditQG(mod,sp,gi);
+  var g=(mod==='listening'?getTC().listening.sections[sp].groups:getTC().reading.passages[sp].groups)[gi];
+  if(g && isSum(g.type)){ injectExtras('eqg',g); rendWBT2('eqg-wbt','eqg'); }
+};
+
+// ── Saving: title + lettered flag (new group) ──
+function checkLettered(pfx){
+  if(curType(pfx)!=='summary2' || !lettered(pfx)) return true;
+  if(!(window.qgWB||[]).length){ showToast('Add the words for the word box first.','err'); return false; }
+  var blanks=window.sumBlanks||[];
+  if(blanks.some(function(b){ return !/^[A-Z]$/.test(String(b.answer||'').toUpperCase()); })){
+    showToast('Choose the correct letter for every blank.','err'); return false;
+  }
+  return true;
+}
+var _saveQG=saveQG;
+saveQG=function(){
+  var ty=curType('qg'), sum=isSum(ty);
+  var title=sum?((document.getElementById('qg-sum-title')||{}).value||'').trim():'';
+  var let_=ty==='summary2' && lettered('qg');
+  if(sum && !checkLettered('qg')) return;
+  var arr=groupsOf(qgCtx), before=arr.length;
+  _saveQG();
+  if(!sum || arr.length<=before) return;
+  var g=arr[arr.length-1];
+  g.summaryTitle=title; g.wordBoxLettered=let_;
+  renderMod(curTOwner==='admin'?'a':'t',qgCtx.mod);
+};
+
+// ── Saving: edit existing group ──
+var _updateQG=updateQG;
+updateQG=function(){
+  var ty=curType('eqg'), sum=isSum(ty);
+  var txtEl=document.getElementById('eqg-sum-txt');
+  if(sum && !checkLettered('eqg')) return;
+  var title=sum?((document.getElementById('eqg-sum-title')||{}).value||'').trim():'';
+  var let_=ty==='summary2' && lettered('eqg');
+  var ctx=editQGCtx, g=groupsOf(ctx)[ctx.gi];
+  var ok=!txtEl || /\[Q\d+\]/i.test(txtEl.value);
+  _updateQG();
+  if(sum && g && ok){
+    g.summaryTitle=title; g.wordBoxLettered=let_;
+    renderMod(curTOwner==='admin'?'a':'t',ctx.mod);
+  }
+};
+
+// ── Teacher's group card: show title + lettered word list ──
+var _rendQGCard=rendQGCard;
+rendQGCard=function(g,gi,mod,sp){
+  var h=_rendQGCard(g,gi,mod,sp);
+  if(isSum(g.type)){
+    var extra='';
+    if(g.summaryTitle) extra+='<div style="font-size:12px;color:var(--mu);margin-bottom:6px">Title: <strong>'+esc(g.summaryTitle)+'</strong></div>';
+    if(extra) h=h.replace('<div class="qb-body">','<div class="qb-body">'+extra);
+    if(g.type==='summary2' && g.wordBoxLettered && g.wordBox && g.wordBox.length){
+      var lettersHTML='<div style="margin-bottom:6px;font-size:12px;color:var(--mu)">Word box (lettered): '+
+        g.wordBox.map(function(w,i){return '<span class="tag"><strong>'+LET[i]+'</strong> '+esc(w)+'</span>';}).join('')+'</div>';
+      h=h.replace(/<div style="margin-bottom:6px;font-size:12px;color:var\(--mu\)">Word box: [\s\S]*?<\/div>/,lettersHTML);
+    }
+  }
+  return h;
+};
+
+// ── What students (and Preview / Classroom) see ──
+function titleHTML(t){ return '<div style="text-align:center;font-weight:700;font-size:16px;margin:12px 0 10px">'+esc(t)+'</div>'; }
+
+function letteredSummary(g){
+  var tl=(QTYPES.find(function(t){return t.v===g.type;})||{l:'Summary Completion'}).l;
+  var words=g.wordBox||[];
+  var h='<div class="prev-qblock"><div class="prev-qtl">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>';
+  if(g.instruction) h+='<div class="prev-inst">'+renderBold(g.instruction)+(g.wordLimit?' <strong>'+g.wordLimit+'</strong>':'')+'</div>';
+  if(g.summaryTitle) h+=titleHTML(g.summaryTitle);
+  var opts='<option value="">—</option>'+words.map(function(w,i){return '<option value="'+LET[i]+'">'+LET[i]+'</option>';}).join('');
+  var para=renderBold(g.summaryText).replace(/\[Q(\d+)\]/gi,function(m,qn){
+    var n=parseInt(qn,10);
+    return '<strong style="margin:0 4px 0 2px">'+n+'</strong>'+
+      '<select class="prev-fb" style="min-width:64px;cursor:pointer" onchange="prevAnswers['+n+']=this.value">'+opts+'</select>';
+  });
+  h+='<div style="line-height:2.3;font-size:14px;margin-bottom:6px">'+para+'</div>';
+  h+='<div style="border:1.5px solid var(--t);border-radius:4px;padding:14px 16px;margin-top:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px 18px;font-size:13px;line-height:1.5">'+
+    words.map(function(w,i){
+      return '<div style="display:flex;gap:10px"><strong style="width:18px;flex-shrink:0">'+LET[i]+'</strong><span>'+esc(w)+'</span></div>';
+    }).join('')+'</div>';
+  h+='</div>';
+  return h;
+}
+var _buildPrevQBlock=buildPrevQBlock;
+buildPrevQBlock=function(g,getQNum){
+  if(isSum(g.type) && g.summaryText){
+    if(g.type==='summary2' && g.wordBoxLettered && (g.wordBox||[]).length) return letteredSummary(g);
+    var h=_buildPrevQBlock(g,getQNum);
+    if(g.summaryTitle) h=h.replace('<div class="prev-stem" style="line-height:2.4',titleHTML(g.summaryTitle)+'<div class="prev-stem" style="line-height:2.4');
+    return h;
+  }
+  return _buildPrevQBlock(g,getQNum);
+};
+
+// ── Student test: put saved answers back after every re-render ──
+window.restoreTestAnswers=function(root){
+  if(!root||!window.testState) return;
+  var ans=testState.answers||{};
+  root.querySelectorAll('input,select,textarea').forEach(function(el){
+    var h=(el.getAttribute('oninput')||'')+' '+(el.getAttribute('onchange')||'');
+    var m=h.match(/testAns\((\d+),this\.value\)/); if(!m) return;
+    var v=ans[m[1]]; if(v===undefined||v===null||v==='') return;
+    if(el.type==='radio'){
+      el.checked=(el.value===String(v));
+      if(el.checked && /highlightMapRow/.test(h) && typeof highlightMapRow==='function'){ try{ highlightMapRow(parseInt(m[1],10)); }catch(e){} }
+    } else if(el.type!=='checkbox'){ el.value=v; }
+  });
+  // "Choose several" groups
+  var done={};
+  root.querySelectorAll('label[id^="mcqm-opt-"]').forEach(function(lb){
+    var m=(lb.getAttribute('onclick')||'').match(/togMCQMv2Test\('([^']+)','([A-Z])',(\d+),(\d+),(\d+)\)/); if(!m) return;
+    var gid=m[1], letter=m[2], max=parseInt(m[3],10), from=parseInt(m[4],10), to=parseInt(m[5],10);
+    var picked=[]; for(var q=from;q<=to;q++){ if(ans[q]) picked.push(ans[q]); }
+    var on=picked.indexOf(letter)>-1, cb=document.getElementById('mcqmcb-'+gid+'-'+letter);
+    if(cb) cb.checked=on;
+    lb.style.background=on?'var(--bll)':''; lb.style.borderColor=on?'var(--bl)':'';
+    if(!done[gid]){
+      done[gid]=1;
+      for(var q2=from;q2<=to;q2++){ if(typeof prevAnswers!=='undefined') prevAnswers[q2]=ans[q2]||''; }
+      var st=document.getElementById('mcqm-status-'+gid);
+      if(st){ var okc=picked.length===max;
+        st.innerHTML='Selected: <strong style="color:'+(okc?'var(--gr)':'var(--t)')+'">'+(picked.join(', ')||'none')+'</strong> ('+picked.length+' / '+max+')';
+        st.style.color=okc?'var(--gr)':'var(--mu)'; }
+    }
+  });
+};
+var _renderTestModule=renderTestModule;
+renderTestModule=function(){
+  _renderTestModule.apply(this,arguments);
+  try{ restoreTestAnswers(document.getElementById('test-body')); }catch(e){ console.error('restore answers',e); }
+};
+
+console.log('JIC IELTS — summary title + lettered word box + answer restore loaded ✓');
+})();
+</script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: scroll back to the top when switching Listening parts
+//  (student test + Classroom transcript/questions).
+//  The earlier version stopped at a function that doesn't exist
+//  (swListenPart), so these parts never got installed.
+// ═══════════════════════════════════════════════
+(function(){
+  function toTop(ids){
+    ids.forEach(function(id){ var e=document.getElementById(id); if(e) e.scrollTop=0; });
+  }
+  // Classroom: Listening part tabs → transcript + questions panels
+  var _showCMPart=showCMPart;
+  showCMPart=function(n){
+    _showCMPart(n);
+    setTimeout(function(){ toTop(['cm-transcript-panel','cm-questions-panel']); },50);
+  };
+  // Student test: Listening part tabs
+  var _renderTestModule=renderTestModule;
+  renderTestModule=function(){
+    _renderTestModule.apply(this,arguments);
+    if(window.testState && testState.module==='listening'){
+      setTimeout(function(){
+        var body=document.getElementById('test-body');
+        if(!body) return;
+        body.scrollTop=0;
+        var lw=body.querySelector('.listen-wrap'); if(lw) lw.scrollTop=0;
+      },50);
+    }
+  };
+  console.log('JIC IELTS — listening scroll-to-top fix loaded ✓');
 })();
 </script>
