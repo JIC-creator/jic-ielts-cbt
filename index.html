@@ -19544,3 +19544,40 @@ console.log('JIC IELTS — summary title + lettered word box + answer restore lo
   console.log('JIC IELTS — listening scroll-to-top fix loaded ✓');
 })();
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  FIX: "Start test" → "Student screen not ready"
+//  The tabbed student portal replaced the old #shome/#spick areas
+//  that the module picker drew into. It now draws inside the
+//  My Tests tab, and Back / Back to tests restores the list.
+// ═══════════════════════════════════════════════
+(function(){
+  var _show = showAssignedModulePicker;
+  showAssignedModulePicker = function(testId, t, asgn){
+    // old layout still present → behave as before
+    if(document.getElementById('shome') && document.getElementById('spick')) return _show(testId, t, asgn);
+    var panel = document.getElementById('spanel-tests');
+    if(!panel){ showToast('Student screen not ready. Please refresh.','err'); return; }
+    // reuse the original module-picker markup through temporary containers
+    var tmpHome=document.createElement('div'), tmpPick=document.createElement('div');
+    tmpHome.id='shome'; tmpPick.id='spick';
+    tmpHome.style.display='none'; tmpPick.style.display='none';
+    document.body.appendChild(tmpHome); document.body.appendChild(tmpPick);
+    var html='';
+    try{ _show(testId, t, asgn); html=tmpPick.innerHTML; }
+    finally{ document.body.removeChild(tmpHome); document.body.removeChild(tmpPick); }
+    if(!html){ showToast('Could not open the test. Please refresh.','err'); return; }
+    window._testsPanelContent = panel.innerHTML;   // so Back can bring the list back
+    panel.innerHTML = html;
+    window.scrollTo(0,0);
+  };
+
+  // After a module (or practice) ends, go back to the test list, not the module picker
+  var _exit = exitToStudent;
+  exitToStudent = function(){
+    if(window._testsPanelContent && typeof exitPracticePicker==='function') exitPracticePicker();
+    _exit.apply(this, arguments);
+  };
+  console.log('JIC IELTS — Start test picker fix loaded ✓');
+})();
+</script>
