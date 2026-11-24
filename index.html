@@ -20043,3 +20043,50 @@ aN=function(pg,el){
 console.log('JIC IELTS — admin sharing (teachers + students) loaded ✓');
 })();
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  REMOVE AN ASSIGNMENT (admin + teachers)
+//  Hides the test from the students it was assigned to.
+//  Results students already submitted are KEPT.
+//  Only the person's own assignment of that test is removed
+//  (another teacher's assignment of the same test is untouched).
+// ═══════════════════════════════════════════════
+(function(){
+
+var _openAssign=openAssignModal;
+openAssignModal=function(testId,testName){
+  _openAssign(testId,testName);
+  // add "Remove assignment" only when this person has already assigned this test
+  db.collection('assignments').where('testId','==',testId).where('teacherId','==',CU.uid).get().then(function(snap){
+    var foot=document.querySelector('#mo-assign .mf');
+    if(snap.empty||!foot||document.getElementById('assign-remove-btn')) return;
+    var students=0; snap.forEach(function(d){ students=Math.max(students,(d.data().studentIds||[]).length); });
+    var btn=document.createElement('button');
+    btn.className='btn btn-d'; btn.id='assign-remove-btn'; btn.style.marginRight='auto';
+    btn.textContent='🗑 Remove assignment';
+    btn.onclick=function(){ removeAssignment(testId,testName,students,btn); };
+    foot.insertBefore(btn,foot.firstChild);
+  }).catch(function(e){ console.error('assign lookup',e); });
+};
+
+window.removeAssignment=function(testId,testName,count,btn){
+  if(!confirm('Remove the assignment of “'+testName+'”?'+
+      '\n\n• '+(count?count+' student'+(count===1?'':'s')+' will':'Students will')+' no longer see it in My Tests.'+
+      '\n• Results students already submitted are kept.'+
+      '\n• You can assign it again at any time.')) return;
+  if(btn){ btn.disabled=true; btn.textContent='Removing…'; }
+  db.collection('assignments').where('testId','==',testId).where('teacherId','==',CU.uid).get().then(function(snap){
+    var jobs=[]; snap.forEach(function(d){ jobs.push(db.collection('assignments').doc(d.id).delete()); });
+    return Promise.all(jobs);
+  }).then(function(){
+    closeAssignModal();
+    showToast('Assignment removed. Results already submitted are kept.');
+  }).catch(function(e){
+    if(btn){ btn.disabled=false; btn.textContent='🗑 Remove assignment'; }
+    showToast('Error: '+e.message,'err');
+  });
+};
+
+console.log('JIC IELTS — remove assignment loaded ✓');
+})();
+</script>
