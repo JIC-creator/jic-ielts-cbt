@@ -19586,3 +19586,230 @@ console.log('JIC IELTS — summary title + lettered word box + answer restore lo
   console.log('JIC IELTS — Start test picker fix loaded ✓');
 })();
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  TEACHER → ADMIN: SHARE A TEST (simple version)
+//  Teacher shares a test with the admin. The admin can SAVE it
+//  (a draft copy goes into Shared tests) or DELETE it from the list.
+//  The teacher always keeps their own test.
+//  Collection: test_submissions  {testId,testName,testType,teacherId,
+//                                 teacherName,status:'pending',createdAt}
+// ═══════════════════════════════════════════════
+(function(){
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function ms(ts){ try{ return ts&&ts.toDate?ts.toDate().getTime():0; }catch(e){ return 0; } }
+function fmtDate(ts){ try{ var d=ts&&ts.toDate?ts.toDate():null; return d?d.toLocaleDateString():''; }catch(e){ return ''; } }
+function myName(){ return ((document.getElementById('t-name')||{}).textContent||'').trim() || (window._myDoc&&window._myDoc.name) || 'Teacher'; }
+function stamp(){ return firebase.firestore.FieldValue.serverTimestamp(); }
+
+// ───────────── TEACHER SIDE ─────────────
+// One "Share with admin" button on every card in My test library
+function decorateMyTests(){
+  var el=document.getElementById('my-tests');
+  if(!el||!window.CU||window.CRole!=='teacher') return;
+  var cards=el.querySelectorAll('.tc'); if(!cards.length) return;
+  db.collection('test_submissions').where('teacherId','==',CU.uid).get().then(function(snap){
+    var waiting={};
+    snap.forEach(function(d){ var s=d.data(); if(s.status==='pending') waiting[s.testId]=true; });
+    cards.forEach(function(card){
+      var m=(card.getAttribute('onclick')||'').match(/openEdit\('([^']+)'/); if(!m) return;
+      var tid=m[1], pending=!!waiting[tid];
+      card.querySelectorAll('.sub-extra').forEach(function(n){ n.parentNode.removeChild(n); });
+      var btn=document.createElement('button');
+      btn.className='btn btn-sm sub-extra';
+      btn.style.cssText='margin-left:6px;flex-shrink:0'+(pending?';background:var(--aml);color:var(--am);border-color:var(--am)':'');
+      btn.textContent=pending?'📨 Shared':'📨 Share with admin';
+      btn.title=pending?'Already shared — waiting for the admin':'Share this test with the admin';
+      btn.onclick=function(e){
+        e.stopPropagation();
+        if(pending) showToast('Already shared with the admin.');
+        else shareWithAdmin(tid);
+      };
+      var del=card.querySelector('button.btn-d');
+      if(del) card.insertBefore(btn,del); else card.appendChild(btn);
+    });
+  }).catch(function(e){ console.error('share status',e); });
+}
+window.decorateMyTests=decorateMyTests;
+
+window.shareWithAdmin=function(testId){
+  db.collection('tests').doc(testId).get().then(function(td){
+    if(!td.exists) throw new Error('Test not found.');
+    var t=td.data();
+    if(!confirm('Share “'+(t.name||'this test')+'” with the admin?\n\nYou keep your own test either way.')) return null;
+    return db.collection('test_submissions').where('teacherId','==',CU.uid).where('testId','==',testId).get().then(function(snap){
+      var pending=false; snap.forEach(function(d){ if(d.data().status==='pending') pending=true; });
+      if(pending) throw new Error('Already shared with the admin.');
+      return db.collection('test_submissions').add({
+        testId:testId, testName:t.name||'Test', testType:t.type||'',
+        teacherId:CU.uid, teacherName:myName(), status:'pending', createdAt:stamp()
+      });
+    }).then(function(){ showToast('✓ Shared with the admin.'); decorateMyTests(); });
+  }).catch(function(e){ showToast(e.message,'err'); });
+};
+
+// Re-add the button whenever the list is re-drawn
+var mt=document.getElementById('my-tests');
+if(mt) new MutationObserver(function(){ decorateMyTests(); }).observe(mt,{childList:true});
+
+// (kept so older "admin decided" notices in a teacher's bell still read properly)
+rendNotifications=function(){
+  var el=document.getElementById('t-notif-list'); if(!el) return;
+  if(!notifications.length){ el.innerHTML='<div class="notif-empty">No notifications yet.</div>'; return; }
+  el.innerHTML=notifications.map(function(n){
+    var time=''; try{ time=n.createdAt?new Date(n.createdAt.toDate()).toLocaleString():''; }catch(e){}
+    var icon, detail;
+    if(n.type==='test_shared'){
+      icon='🔗'; detail='<strong>'+esc(n.fromName)+'</strong> shared a test with you: '+esc(n.testName);
+    } else if(n.type==='admin_decision'){
+      icon=n.decision==='saved'?'📥':'🚫';
+      detail=n.decision==='saved'
+        ? 'The admin <strong>saved</strong> your test “'+esc(n.testName)+'” to the shared library.'
+        : 'The admin decided <strong>not to use</strong> your test “'+esc(n.testName)+'”.'+(n.note?' Reason: '+esc(n.note):'');
+    } else {
+      icon='✅'; detail=esc(n.studentName)+' completed <strong>'+esc(n.module)+'</strong> · '+esc(n.testName);
+    }
+    return '<div class="notif-item'+(n.read?'':' unread')+'" onclick="markRead(\''+n.id+'\')">'+
+      '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">'+icon+'</span>'+
+      '<div><div class="ni-detail">'+detail+'</div><div class="ni-time">'+time+'</div></div></div></div>';
+  }).join('');
+};
+
+// ───────────── ADMIN SIDE ─────────────
+var subs=[];
+
+var navs=document.querySelectorAll('#s-admin .ni'), sharedNav=null;
+navs.forEach(function(n){ if((n.getAttribute('onclick')||'').indexOf("aN('shared'")===0) sharedNav=n; });
+var subNav=document.createElement('div');
+subNav.className='ni'; subNav.setAttribute('onclick',"aN('subs',this)");
+subNav.innerHTML='📥 From teachers <span id="subs-badge" style="display:none;background:var(--rd);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;padding:0 5px;align-items:center;justify-content:center;margin-left:6px">0</span>';
+if(sharedNav) sharedNav.parentNode.insertBefore(subNav,sharedNav.nextSibling);
+
+var page=document.createElement('div'); page.className='ap mcn'; page.id='aa-subs';
+page.innerHTML=
+ '<div style="font-size:18px;font-weight:600;margin-bottom:4px">Tests shared by teachers</div>'+
+ '<div style="font-size:13px;color:var(--mu);margin-bottom:16px">Save a test to your shared library, or delete it from this list. The teacher always keeps their own test.</div>'+
+ '<div id="subs-list"><div style="padding:24px;text-align:center;color:var(--mu);font-size:13px">Open this page to load tests.</div></div>';
+document.getElementById('admin-main').appendChild(page);
+
+// Highlight the right sidebar item by page, and load the list when opened
+var _aN=aN;
+aN=function(pg,el){
+  _aN(pg,el);
+  var items=document.querySelectorAll('#s-admin .ni'), hit=null;
+  items.forEach(function(n){ var m=(n.getAttribute('onclick')||'').match(/^aN\('([^']+)'/); if(m&&m[1]===pg) hit=n; });
+  if(hit){ items.forEach(function(n){ n.classList.remove('active'); }); hit.classList.add('active'); }
+  if(pg==='subs') loadSubmissions();
+  refreshSubBadge();
+};
+
+window.refreshSubBadge=function(){
+  if(window.CRole!=='admin'||!window.CU) return;
+  db.collection('test_submissions').where('status','==','pending').get().then(function(snap){
+    var b=document.getElementById('subs-badge'); if(!b) return;
+    b.textContent=snap.size; b.style.display=snap.size?'inline-flex':'none';
+  }).catch(function(){});
+};
+var _loadAdmin=loadAdmin;
+loadAdmin=function(){ var r=_loadAdmin.apply(this,arguments); setTimeout(window.refreshSubBadge,800); return r; };
+setInterval(function(){ window.refreshSubBadge(); },60000);
+
+window.loadSubmissions=function(){
+  var el=document.getElementById('subs-list');
+  if(el) el.innerHTML='<div style="padding:24px;text-align:center;color:var(--mu);font-size:13px">⏳ Loading...</div>';
+  db.collection('test_submissions').where('status','==','pending').get().then(function(snap){
+    subs=[]; snap.forEach(function(d){ var s=d.data(); s.id=d.id; subs.push(s); });
+    subs.sort(function(a,b){ return ms(a.createdAt)-ms(b.createdAt); });
+    renderSubs(); window.refreshSubBadge();
+  }).catch(function(e){
+    if(el) el.innerHTML='<div style="padding:24px;text-align:center;color:var(--rd);font-size:13px">Error: '+esc(e.message)+'</div>';
+  });
+};
+
+function renderSubs(){
+  var el=document.getElementById('subs-list'); if(!el) return;
+  if(!subs.length){
+    el.innerHTML='<div style="padding:32px;text-align:center;color:var(--mu);font-size:13px"><div style="font-size:36px;margin-bottom:8px">📥</div>Nothing shared with you right now.</div>';
+    return;
+  }
+  el.innerHTML=subs.map(function(s){
+    return '<div class="card" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+      '<div style="font-size:24px">📋</div>'+
+      '<div style="flex:1;min-width:200px">'+
+        '<div style="font-size:15px;font-weight:700">'+esc(s.testName)+'</div>'+
+        '<div style="font-size:12px;color:var(--mu);margin-top:2px">'+esc(s.testType)+' · from <strong>'+esc(s.teacherName)+'</strong> · shared '+fmtDate(s.createdAt)+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn btn-sm" onclick="subPreview(\''+s.testId+'\')">👁 Preview</button>'+
+        '<button class="btn btn-sm btn-p" onclick="subSave(\''+s.id+'\',this)">✅ Save</button>'+
+        '<button class="btn btn-sm btn-d" onclick="subDelete(\''+s.id+'\',this)">🗑 Delete</button>'+
+      '</div></div></div>';
+  }).join('');
+}
+
+// Read-only look at the teacher's test (annotating is switched off for the 'viewer' role)
+window.subPreview=function(testId){
+  db.collection('tests').doc(testId).get().then(function(td){
+    if(!td.exists){ showToast('The teacher has deleted this test.','err'); return; }
+    return db.collection('tests').doc(testId).collection('content').doc('data').get().then(function(c){
+      enterClassroom(testId,td.data(),c.exists?normalizeTC(c.data()):null,'viewer');
+    });
+  }).catch(function(e){ showToast('Error: '+e.message,'err'); });
+};
+var _exitClassroom=exitClassroom;
+exitClassroom=function(){
+  if(window.CRole==='admin'){ try{ stopCMAud(); }catch(e){} showS('admin'); return; }
+  _exitClassroom.apply(this,arguments);
+};
+
+function busy(btn,txt){ if(btn&&btn.dataset){ btn.disabled=true; btn.dataset.t=btn.textContent; btn.textContent=txt; } }
+function unbusy(btn){ if(btn&&btn.dataset){ btn.disabled=false; if(btn.dataset.t) btn.textContent=btn.dataset.t; } }
+
+// ✅ Save → draft copy in Shared tests, then it leaves this list
+window.subSave=function(id,btn){
+  var s=subs.filter(function(x){return x.id===id;})[0]; if(!s) return;
+  if(!confirm('Save “'+s.testName+'” to Shared tests?\n\nA draft copy is added for you. '+s.teacherName+' keeps their own test.')) return;
+  busy(btn,'Saving…');
+  var newId=null;
+  db.collection('test_submissions').doc(id).get().then(function(sd){
+    if(!sd.exists) throw new Error('This one was already handled.');
+    return db.collection('tests').doc(s.testId).get();
+  }).then(function(td){
+    if(!td.exists) throw new Error('The teacher has deleted this test, so it can’t be saved. You can delete it from this list.');
+    var copy=Object.assign({},td.data(),{
+      owner:'admin', visibility:'draft', createdBy:CU.uid,
+      sourceTestId:s.testId, sourceTeacherId:s.teacherId, sourceTeacherName:s.teacherName,
+      createdAt:stamp()
+    });
+    ['teacherId','status','duplicatedFrom','promotedToShared'].forEach(function(k){ delete copy[k]; });
+    return db.collection('tests').add(copy);
+  }).then(function(ref){
+    newId=ref.id;
+    return Promise.all(['content','highlights','reading_highlights'].map(function(sub){
+      return db.collection('tests').doc(s.testId).collection(sub).doc('data').get().then(function(c){
+        if(c.exists) return db.collection('tests').doc(newId).collection(sub).doc('data').set(c.data());
+      });
+    }));
+  }).then(function(){
+    return db.collection('test_submissions').doc(id).delete();
+  }).then(function(){
+    showToast('✓ Saved to Shared tests as a draft.');
+    loadSubmissions();
+  }).catch(function(e){ unbusy(btn); showToast(e.message,'err'); });
+};
+
+// 🗑 Delete → just removes it from this list (the teacher's test is untouched)
+window.subDelete=function(id,btn){
+  var s=subs.filter(function(x){return x.id===id;})[0]; if(!s) return;
+  if(!confirm('Delete “'+s.testName+'” from this list?\n\n'+s.teacherName+' keeps their own test.')) return;
+  busy(btn,'Deleting…');
+  db.collection('test_submissions').doc(id).delete().then(function(){
+    showToast('Removed from your list.');
+    loadSubmissions();
+  }).catch(function(e){ unbusy(btn); showToast(e.message,'err'); });
+};
+
+console.log('JIC IELTS — teacher → admin share (simple) loaded ✓');
+})();
+</script>
