@@ -19701,6 +19701,7 @@ aN=function(pg,el){
   items.forEach(function(n){ var m=(n.getAttribute('onclick')||'').match(/^aN\('([^']+)'/); if(m&&m[1]===pg) hit=n; });
   if(hit){ items.forEach(function(n){ n.classList.remove('active'); }); hit.classList.add('active'); }
   if(pg==='subs') loadSubmissions();
+  if(pg==='shared') loadShared();
   refreshSubBadge();
 };
 
@@ -19769,7 +19770,7 @@ function unbusy(btn){ if(btn&&btn.dataset){ btn.disabled=false; if(btn.dataset.t
 // ✅ Save → draft copy in Shared tests, then it leaves this list
 window.subSave=function(id,btn){
   var s=subs.filter(function(x){return x.id===id;})[0]; if(!s) return;
-  if(!confirm('Save “'+s.testName+'” to Shared tests?\n\nA draft copy is added for you. '+s.teacherName+' keeps their own test.')) return;
+  if(!confirm('Save “'+s.testName+'” to Shared tests?\n\nA draft copy is added to Shared tests and you’ll be taken there. '+s.teacherName+' keeps their own test.')) return;
   busy(btn,'Saving…');
   var newId=null;
   db.collection('test_submissions').doc(id).get().then(function(sd){
@@ -19794,8 +19795,11 @@ window.subSave=function(id,btn){
   }).then(function(){
     return db.collection('test_submissions').doc(id).delete();
   }).then(function(){
-    showToast('✓ Saved to Shared tests as a draft.');
+    window._justSavedTestId=newId;
+    setTimeout(function(){ window._justSavedTestId=null; },20000);
+    showToast('✓ Saved as a draft in Shared tests.');
     loadSubmissions();
+    aN('shared');   // opens Shared tests (reloads the list) so you can see it
   }).catch(function(e){ unbusy(btn); showToast(e.message,'err'); });
 };
 
@@ -19809,6 +19813,34 @@ window.subDelete=function(id,btn){
     loadSubmissions();
   }).catch(function(e){ unbusy(btn); showToast(e.message,'err'); });
 };
+
+function decorateShared(){
+  var el=document.getElementById('shared-list'); if(!el) return;
+  var cards=el.querySelectorAll('.tc'); if(!cards.length) return;
+  db.collection('tests').where('owner','==','admin').get().then(function(snap){
+    var info={}; snap.forEach(function(d){ info[d.id]=d.data(); });
+    cards.forEach(function(card){
+      var m=(card.getAttribute('onclick')||'').match(/openEdit\('([^']+)'/); if(!m) return;
+      var t=info[m[1]]; if(!t) return;
+      card.querySelectorAll('.src-extra').forEach(function(n){ n.parentNode.removeChild(n); });
+      var meta=card.querySelector('div[style*="font-size:12px"]');
+      if(t.sourceTeacherName && meta && meta.parentNode){
+        var line=document.createElement('div'); line.className='src-extra'; line.style.cssText='font-size:11px;color:var(--mu);margin-top:3px';
+        line.textContent='📥 from '+t.sourceTeacherName; meta.parentNode.appendChild(line);
+      }
+      if(m[1]===window._justSavedTestId){
+        card.style.boxShadow='0 0 0 2px var(--gr)'; card.style.background='var(--grl)';
+        if(meta&&meta.parentNode){
+          var b=document.createElement('div'); b.className='src-extra'; b.style.cssText='font-size:11px;font-weight:700;color:var(--gr);margin-top:3px';
+          b.textContent='🆕 Just saved — it’s a draft until you set it to Shared'; meta.parentNode.appendChild(b);
+        }
+        try{ card.scrollIntoView({block:'center'}); }catch(e){}
+      }
+    });
+  }).catch(function(e){ console.error('decorate shared',e); });
+}
+var sl=document.getElementById('shared-list');
+if(sl) new MutationObserver(function(){ decorateShared(); }).observe(sl,{childList:true});
 
 console.log('JIC IELTS — teacher → admin share (simple) loaded ✓');
 })();
