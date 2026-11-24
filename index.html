@@ -19428,17 +19428,28 @@ rendQGCard=function(g,gi,mod,sp){
 // ── What students (and Preview / Classroom) see ──
 function titleHTML(t){ return '<div style="text-align:center;font-weight:700;font-size:16px;margin:12px 0 10px">'+esc(t)+'</div>'; }
 
+// Dropdown behaviour: the open list shows "A — word", the closed box shows just the letter
+window.sumDDOpen=function(sel){
+  for(var i=0;i<sel.options.length;i++){ var o=sel.options[i]; if(o.dataset.full) o.textContent=o.dataset.full; }
+};
+window.sumDDClose=function(sel){
+  for(var i=0;i<sel.options.length;i++){ var o=sel.options[i]; o.textContent=o.value||'—'; }
+};
 function letteredSummary(g){
   var tl=(QTYPES.find(function(t){return t.v===g.type;})||{l:'Summary Completion'}).l;
   var words=g.wordBox||[];
   var h='<div class="prev-qblock"><div class="prev-qtl">Q'+g.fromQ+'–Q'+g.toQ+' · '+tl+'</div>';
   if(g.instruction) h+='<div class="prev-inst">'+renderBold(g.instruction)+(g.wordLimit?' <strong>'+g.wordLimit+'</strong>':'')+'</div>';
   if(g.summaryTitle) h+=titleHTML(g.summaryTitle);
-  var opts='<option value="">—</option>'+words.map(function(w,i){return '<option value="'+LET[i]+'">'+LET[i]+'</option>';}).join('');
+  var opts='<option value="" data-full="— Select an answer">—</option>'+words.map(function(w,i){
+    return '<option value="'+LET[i]+'" data-full="'+LET[i]+' — '+esc(w)+'">'+LET[i]+'</option>';
+  }).join('');
   var para=renderBold(g.summaryText).replace(/\[Q(\d+)\]/gi,function(m,qn){
     var n=parseInt(qn,10);
-    return '<strong style="margin:0 4px 0 2px">'+n+'</strong>'+
-      '<select class="prev-fb" style="min-width:64px;cursor:pointer" onchange="prevAnswers['+n+']=this.value">'+opts+'</select>';
+    return '<strong style="margin:0 6px 0 2px">'+n+'</strong>'+
+      '<select class="prev-fb" style="width:88px;cursor:pointer;border:1.5px solid var(--bl);border-radius:6px;background:var(--s);padding:3px 6px;font-weight:600" '+
+      'onfocus="sumDDOpen(this)" onmousedown="sumDDOpen(this)" onblur="sumDDClose(this)" '+
+      'onchange="prevAnswers['+n+']=this.value;sumDDClose(this)">'+opts+'</select>';
   });
   h+='<div style="line-height:2.3;font-size:14px;margin-bottom:6px">'+para+'</div>';
   h+='<div style="border:1.5px solid var(--t);border-radius:4px;padding:14px 16px;margin-top:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px 18px;font-size:13px;line-height:1.5">'+
